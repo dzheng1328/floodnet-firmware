@@ -23,13 +23,13 @@ PollingSampler::PollingSampler(IGpsSource &gps, IImuSource &imu, IRadio &radio, 
     line_[0] = '\0';
 }
 
-void PollingSampler::collect_gps_bytes(bool *sentence_ready) {
-    *sentence_ready = false;
+void PollingSampler::collect_gps_bytes(GpsFix *fix, bool *have_fix) {
+    *have_fix = false;
 
     for (;;) {
         const int value = gps_.read_byte();
         if (value < 0) {
-            return;
+            return;  // The receive buffer is genuinely empty, not merely mid-sentence.
         }
 
         const char c = static_cast<char>(value);
@@ -40,10 +40,14 @@ void PollingSampler::collect_gps_bytes(bool *sentence_ready) {
         if (c == '\r' || c == '\n') {
             if (line_len_ > 0) {
                 line_[line_len_] = '\0';
-                *sentence_ready = true;
-                return;
+                GpsFix parsed;
+                if (parse_gga(line_, line_len_, clock_.now_ms(), &parsed) && parsed.valid) {
+                    *fix = parsed;
+                    *have_fix = true;
+                }
+                line_len_ = 0;
             }
-            continue;
+            continue;  // Keep draining: leaving bytes behind would cost us the next stall.
         }
 
         if (line_len_ < NMEA_MAX_SENTENCE) {
@@ -56,15 +60,9 @@ void PollingSampler::collect_gps_bytes(bool *sentence_ready) {
 }
 
 void PollingSampler::step() {
-    bool sentence_ready = false;
-    collect_gps_bytes(&sentence_ready);
-
     GpsFix fix;
-    const bool have_fix =
-        sentence_ready && parse_gga(line_, line_len_, clock_.now_ms(), &fix) && fix.valid;
-    if (sentence_ready) {
-        line_len_ = 0;
-    }
+    bool have_fix = false;
+    collect_gps_bytes(&fix, &have_fix);
 
     // Blocking. Any GPS byte arriving now has no reader and no buffer.
     ImuSample sample;
@@ -72,12 +70,11 @@ void PollingSampler::step() {
         pairer_.submit_imu(sample);
     }
 
+    diag_.drops = gps_.bytes_dropped();
+
     if (!have_fix) {
-        diag_.drops = gps_.bytes_dropped();
         return;
     }
-
-    diag_.drops = gps_.bytes_dropped();
 
     Packet packet;
     packet.node_id = node_id_;

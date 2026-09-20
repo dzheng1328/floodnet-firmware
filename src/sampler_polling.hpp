@@ -29,7 +29,7 @@ class PollingSampler {
     DiagCounters diag() const { return diag_; }
 
   private:
-    void collect_gps_bytes(bool *sentence_ready);
+    void collect_gps_bytes(GpsFix *fix, bool *have_fix);
 
     IGpsSource &gps_;
     IImuSource &imu_;
