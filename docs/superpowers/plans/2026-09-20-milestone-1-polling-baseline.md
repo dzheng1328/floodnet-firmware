@@ -1570,8 +1570,8 @@ void test_gps_drops_bytes_when_fifo_overflows(void) {
     FakeGps gps("$GPGGA\r\n", 1.0);
     clock.add_observer(&gps);
 
-    // FIFO holds 4 bytes; nobody reads during these 20 ms.
-    clock.delay_ms(20);
+    // FIFO holds 64 bytes; nobody reads during these 100 ms.
+    clock.delay_ms(100);
     TEST_ASSERT_GREATER_THAN_UINT16(0, gps.bytes_dropped());
 }
 
@@ -1719,8 +1719,11 @@ class FakeGps : public IGpsSource, public ISimTick {
     uint16_t bytes_dropped() const override { return dropped_; }
 
   private:
-    /// A Teensy 4.x UART FIFO is only a few bytes deep. Four is representative.
-    static const size_t FIFO_DEPTH = 4;
+    /// Matches the 64-byte software receive buffer Teensy 4.x HardwareSerial
+    /// keeps, which is the buffer `TeensyGps` watches for overflow. At 9600
+    /// baud it holds roughly 66 ms of traffic, so a loop that stalls longer
+    /// than that loses bytes.
+    static const size_t FIFO_DEPTH = 64;
 
     void push(char value) {
         if (count_ == FIFO_DEPTH) {
@@ -1925,12 +1928,26 @@ static const double kGpsByteRate = 0.96;
 static const char kSentence[] =
     "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47\r\n";
 
+// Two timing profiles, because they demonstrate two different things.
+//
+// FAST keeps every blocking call short enough that the 64-byte receive buffer
+// never overruns, so sentences arrive intact. It proves the loop works.
+//
+// REALISTIC uses a 10 ms IMU read and 60 ms of LoRa airtime. Together those
+// exceed the ~66 ms the buffer can hold at 9600 baud, so bytes are lost. It
+// proves the loop's defect. Mixing the two into one profile would mean either
+// no packets or no drops, and the milestone needs to show both.
+static const uint32_t kFastImuMs = 2;
+static const uint32_t kFastRadioMs = 5;
+static const uint32_t kRealisticImuMs = 10;
+static const uint32_t kRealisticRadioMs = 60;
+
 void test_emits_a_decodable_packet(void) {
     SimClock clock;
     FakeGps gps(kSentence, kGpsByteRate);
     clock.add_observer(&gps);
-    FakeImu imu(clock, 10);
-    FakeRadio radio(clock, 60);
+    FakeImu imu(clock, kFastImuMs);
+    FakeRadio radio(clock, kFastRadioMs);
 
     PollingSampler sampler(gps, imu, radio, clock, 0x0042, 3);
     for (int i = 0; i < 400; ++i) {
@@ -1951,8 +1968,8 @@ void test_sequence_numbers_increment(void) {
     SimClock clock;
     FakeGps gps(kSentence, kGpsByteRate);
     clock.add_observer(&gps);
-    FakeImu imu(clock, 10);
-    FakeRadio radio(clock, 60);
+    FakeImu imu(clock, kFastImuMs);
+    FakeRadio radio(clock, kFastRadioMs);
 
     PollingSampler sampler(gps, imu, radio, clock, 1, 3);
     for (int i = 0; i < 400; ++i) {
@@ -1970,8 +1987,8 @@ void test_blocking_calls_lose_gps_bytes(void) {
     SimClock clock;
     FakeGps gps(kSentence, kGpsByteRate);
     clock.add_observer(&gps);
-    FakeImu imu(clock, 10);
-    FakeRadio radio(clock, 60);
+    FakeImu imu(clock, kRealisticImuMs);
+    FakeRadio radio(clock, kRealisticRadioMs);
 
     PollingSampler sampler(gps, imu, radio, clock, 1, 3);
     for (int i = 0; i < 400; ++i) {
@@ -1981,12 +1998,29 @@ void test_blocking_calls_lose_gps_bytes(void) {
     TEST_ASSERT_GREATER_THAN_UINT16(0, sampler.diag().drops);
 }
 
+void test_fast_loop_loses_nothing(void) {
+    // The mirror of the test above: the loss is a consequence of the stall,
+    // not something inherent to polling, and this pins that down.
+    SimClock clock;
+    FakeGps gps(kSentence, kGpsByteRate);
+    clock.add_observer(&gps);
+    FakeImu imu(clock, kFastImuMs);
+    FakeRadio radio(clock, kFastRadioMs);
+
+    PollingSampler sampler(gps, imu, radio, clock, 1, 3);
+    for (int i = 0; i < 400; ++i) {
+        sampler.step();
+    }
+
+    TEST_ASSERT_EQUAL_UINT16(0, sampler.diag().drops);
+}
+
 void test_reports_drops_in_the_packet(void) {
     SimClock clock;
     FakeGps gps(kSentence, kGpsByteRate);
     clock.add_observer(&gps);
-    FakeImu imu(clock, 10);
-    FakeRadio radio(clock, 60);
+    FakeImu imu(clock, kRealisticImuMs);
+    FakeRadio radio(clock, kRealisticRadioMs);
 
     PollingSampler sampler(gps, imu, radio, clock, 1, 3);
     for (int i = 0; i < 400; ++i) {
@@ -2002,8 +2036,8 @@ void test_no_transmission_without_a_complete_sentence(void) {
     SimClock clock;
     FakeGps gps("garbage without a dollar sign", kGpsByteRate);
     clock.add_observer(&gps);
-    FakeImu imu(clock, 10);
-    FakeRadio radio(clock, 60);
+    FakeImu imu(clock, kFastImuMs);
+    FakeRadio radio(clock, kFastRadioMs);
 
     PollingSampler sampler(gps, imu, radio, clock, 1, 3);
     for (int i = 0; i < 100; ++i) {
@@ -2018,6 +2052,7 @@ int main(int, char **) {
     RUN_TEST(test_emits_a_decodable_packet);
     RUN_TEST(test_sequence_numbers_increment);
     RUN_TEST(test_blocking_calls_lose_gps_bytes);
+    RUN_TEST(test_fast_loop_loses_nothing);
     RUN_TEST(test_reports_drops_in_the_packet);
     RUN_TEST(test_no_transmission_without_a_complete_sentence);
     return UNITY_END();
@@ -2202,7 +2237,7 @@ void PollingSampler::step() {
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `pio test -e native -f test_polling`
-Expected: PASS, `5 Tests 0 Failures 0 Ignored`.
+Expected: PASS, `6 Tests 0 Failures 0 Ignored`.
 
 - [ ] **Step 7: Run the whole suite**
 
@@ -2355,8 +2390,6 @@ class TeensyImu : public IImuSource {
             return false;
         }
 
-        const sensors_event_t *unused = nullptr;
-        (void)unused;
         sensors_event_t event;
         sensor_.getEvent(&event, Adafruit_BNO055::VECTOR_EULER);
 
