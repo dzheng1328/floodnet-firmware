@@ -1,0 +1,6 @@
+{
+  "name": "floodnet_core",
+  "version": "0.1.0",
+  "description": "Platform-independent FloodNet logic: parsing, packing, relay",
+  "build": { "flags": ["-I include"] }
+}
