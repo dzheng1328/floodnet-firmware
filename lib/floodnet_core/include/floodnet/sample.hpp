@@ -26,7 +26,8 @@ struct ImuSample {
 
 /// Health counters carried in-band so a receiver can see loss at the source.
 struct DiagCounters {
-    uint16_t drops = 0;        ///< sensor bytes lost before the firmware read them
+    uint16_t drops = 0;        ///< the node's IGpsSource::rx_overflows() value; see that
+                                ///< contract for the unit, which differs by implementation
     uint16_t crc_errors = 0;   ///< packets received with a bad CRC
 };
 

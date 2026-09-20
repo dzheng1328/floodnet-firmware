@@ -37,7 +37,7 @@ void test_gps_drops_bytes_when_fifo_overflows(void) {
 
     // FIFO holds 64 bytes; nobody reads during these 100 ms.
     clock.delay_ms(100);
-    TEST_ASSERT_GREATER_THAN_UINT16(0, gps.bytes_dropped());
+    TEST_ASSERT_GREATER_THAN_UINT16(0, gps.rx_overflows());
 }
 
 void test_imu_read_costs_time(void) {

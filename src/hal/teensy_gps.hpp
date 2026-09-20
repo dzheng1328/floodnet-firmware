@@ -22,7 +22,7 @@ class TeensyGps : public IGpsSource {
         return port_.read();
     }
 
-    uint16_t bytes_dropped() const override { return dropped_; }
+    uint16_t rx_overflows() const override { return dropped_; }
 
     /// Call once per loop pass: a full receive buffer means bytes were lost.
     void note_buffer_state() {

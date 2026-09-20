@@ -3,7 +3,6 @@
 #include <floodnet/mesh.hpp>
 #include <floodnet/packet.hpp>
 
-#include "hal/teensy_clock.hpp"
 #include "hal/teensy_radio.hpp"
 
 namespace {
@@ -15,10 +14,10 @@ const uint8_t RADIO_CS_PIN = 10;
 const uint8_t RADIO_RESET_PIN = 9;
 const uint8_t RADIO_DIO0_PIN = 2;
 
-floodnet::TeensyClock g_clock;
 floodnet::TeensyRadio g_radio(RADIO_CS_PIN, RADIO_DIO0_PIN, RADIO_RESET_PIN);
 floodnet::DedupTable g_dedup;
 uint16_t g_crc_errors = 0;
+uint16_t g_short_reads = 0;
 
 /// One line per packet, comma separated, so the host pipeline can read it
 /// without a framing layer.
@@ -65,6 +64,16 @@ void loop() {
     uint8_t buffer[floodnet::PACKET_SIZE];
     const int received = g_radio.receive(buffer, sizeof(buffer));
     if (received != static_cast<int>(floodnet::PACKET_SIZE)) {
+        if (received < 0) {
+            return;  // Nothing waiting. Not an error.
+        }
+        if (g_short_reads < 0xFFFF) {
+            ++g_short_reads;
+        }
+        Serial.print("ERR,short,");
+        Serial.print(received);
+        Serial.print(',');
+        Serial.println(g_short_reads);
         return;
     }
 

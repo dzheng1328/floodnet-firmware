@@ -43,7 +43,7 @@ class FakeGps : public IGpsSource, public ISimTick {
         return static_cast<int>(value);
     }
 
-    uint16_t bytes_dropped() const override { return dropped_; }
+    uint16_t rx_overflows() const override { return dropped_; }
 
   private:
     /// Matches the 64-byte software receive buffer Teensy 4.x HardwareSerial

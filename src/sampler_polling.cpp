@@ -70,7 +70,7 @@ void PollingSampler::step() {
         pairer_.submit_imu(sample);
     }
 
-    diag_.drops = gps_.bytes_dropped();
+    diag_.drops = gps_.rx_overflows();
 
     if (!have_fix) {
         return;
@@ -93,7 +93,7 @@ void PollingSampler::step() {
         ++packets_sent_;
     }
 
-    diag_.drops = gps_.bytes_dropped();
+    diag_.drops = gps_.rx_overflows();
 }
 
 }  // namespace floodnet

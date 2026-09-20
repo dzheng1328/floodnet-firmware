@@ -12,8 +12,14 @@ class IGpsSource {
     /// Returns the next buffered byte, or -1 when none is available.
     virtual int read_byte() = 0;
 
-    /// Bytes the receive hardware discarded because its FIFO was full.
-    virtual uint16_t bytes_dropped() const = 0;
+    /// Receive-buffer overflow indications. The unit is implementation-defined
+    /// and deliberately so: the simulation counts one per byte it discards,
+    /// because it knows exactly how many it discarded, while the Teensy UART
+    /// counts one per poll that found the buffer saturated, because the
+    /// hardware does not expose a lost-byte count and cannot know. Compare
+    /// values only between runs of the SAME implementation. A simulated figure
+    /// and a hardware figure are not the same quantity.
+    virtual uint16_t rx_overflows() const = 0;
 };
 
 }  // namespace floodnet
