@@ -12,9 +12,12 @@ SensorRecord SamplePairer::pair(const GpsFix &fix, const DiagCounters &diag) con
     record.diag = diag;
 
     if (latest_.valid) {
-        // Unsigned subtraction, so order the operands rather than using abs().
-        const uint32_t skew = (fix.time_ms > latest_.time_ms) ? (fix.time_ms - latest_.time_ms)
-                                                              : (latest_.time_ms - fix.time_ms);
+        // Wrap-safe difference. Unsigned subtraction wraps modulo 2^32, so casting the
+        // result to int32_t recovers the true signed gap for any interval shorter than
+        // 2^31 ms (about 24.8 days), which is far longer than any skew budget we use.
+        // This is what keeps pairing correct across the millis() rollover at 49.7 days.
+        const int32_t delta = static_cast<int32_t>(fix.time_ms - latest_.time_ms);
+        const uint32_t skew = static_cast<uint32_t>(delta < 0 ? -delta : delta);
         if (skew <= max_skew_ms_) {
             record.imu = latest_;
         }

@@ -76,6 +76,29 @@ void test_diag_counters_pass_through(void) {
     TEST_ASSERT_EQUAL_UINT16(3, record.diag.crc_errors);
 }
 
+void test_pairs_across_clock_wrap(void) {
+    // IMU sample at 5 ms before the 32-bit wrap (0xFFFFFFFFu + 1 cycles to 0u).
+    // GPS fix at 5 ms after the wrap. True gap is 10 ms, well within 50 ms budget.
+    SamplePairer pairer(50);
+    pairer.submit_imu(imu_at(0xFFFFFFFBu));
+
+    const SensorRecord record = pairer.pair(fix_at(5u), DiagCounters());
+    TEST_ASSERT_TRUE(record.imu.valid);
+    TEST_ASSERT_EQUAL_INT16(1234, record.imu.yaw_cd);
+}
+
+void test_rejects_across_clock_wrap_beyond_budget(void) {
+    // IMU sample far before the wrap, GPS fix shortly after the wrap.
+    // Real gap is much larger than the skew budget, so rejection is mandatory.
+    // IMU at 0xFFFFFF00u (256 ms before wrap), fix at 5u (5 ms after wrap).
+    // True gap is (256 + 5) = 261 ms, well beyond 50 ms budget.
+    SamplePairer pairer(50);
+    pairer.submit_imu(imu_at(0xFFFFFF00u));
+
+    const SensorRecord record = pairer.pair(fix_at(5u), DiagCounters());
+    TEST_ASSERT_FALSE(record.imu.valid);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_pairs_imu_within_skew);
@@ -84,5 +107,7 @@ int main(int, char **) {
     RUN_TEST(test_no_imu_submitted_yields_invalid_imu);
     RUN_TEST(test_latest_imu_wins);
     RUN_TEST(test_diag_counters_pass_through);
+    RUN_TEST(test_pairs_across_clock_wrap);
+    RUN_TEST(test_rejects_across_clock_wrap_beyond_budget);
     return UNITY_END();
 }
