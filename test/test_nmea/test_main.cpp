@@ -70,6 +70,61 @@ void test_parse_rejects_oversized_sentence(void) {
     TEST_ASSERT_FALSE(parse_gga(oversized, sizeof(oversized), 0, &fix));
 }
 
+static bool feed_all(NmeaLineAssembler *assembler, const char *text) {
+    bool completed = false;
+    for (const char *p = text; *p != '\0'; ++p) {
+        if (assembler->feed(*p)) {
+            completed = true;
+        }
+    }
+    return completed;
+}
+
+void test_assembler_completes_a_sentence_on_the_terminator(void) {
+    NmeaLineAssembler assembler;
+    const char *text = "$GPGGA,123519,4807.038,N*47\r\n";
+
+    TEST_ASSERT_TRUE(feed_all(&assembler, text));
+    TEST_ASSERT_EQUAL_STRING("$GPGGA,123519,4807.038,N*47", assembler.sentence());
+    TEST_ASSERT_EQUAL_size_t(27, assembler.length());
+}
+
+void test_assembler_reports_nothing_until_the_terminator(void) {
+    NmeaLineAssembler assembler;
+
+    TEST_ASSERT_FALSE(feed_all(&assembler, "$GPGGA,123519"));
+}
+
+void test_assembler_restarts_on_a_dollar_sign(void) {
+    // A sentence truncated mid-flight must not contaminate the next one.
+    NmeaLineAssembler assembler;
+
+    TEST_ASSERT_FALSE(feed_all(&assembler, "$GPGGA,trunc"));
+    TEST_ASSERT_TRUE(feed_all(&assembler, "$GPGGA,123519*47\r\n"));
+    TEST_ASSERT_EQUAL_STRING("$GPGGA,123519*47", assembler.sentence());
+}
+
+void test_assembler_discards_an_overlong_sentence(void) {
+    NmeaLineAssembler assembler;
+    char overlong[NMEA_MAX_SENTENCE + 20];
+    overlong[0] = '$';
+    for (size_t i = 1; i < sizeof(overlong) - 1; ++i) {
+        overlong[i] = 'A';
+    }
+    overlong[sizeof(overlong) - 1] = '\0';
+
+    TEST_ASSERT_FALSE(feed_all(&assembler, overlong));
+    // Resynchronises on the next '$' rather than emitting a truncated line.
+    TEST_ASSERT_TRUE(feed_all(&assembler, "$GPGGA,ok*47\r\n"));
+    TEST_ASSERT_EQUAL_STRING("$GPGGA,ok*47", assembler.sentence());
+}
+
+void test_assembler_ignores_a_bare_terminator(void) {
+    NmeaLineAssembler assembler;
+
+    TEST_ASSERT_FALSE(feed_all(&assembler, "\r\n\r\n"));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_checksum_accepts_valid_sentence);
@@ -80,5 +135,10 @@ int main(int, char **) {
     RUN_TEST(test_parse_rejects_wrong_sentence_type);
     RUN_TEST(test_parse_rejects_truncated_sentence);
     RUN_TEST(test_parse_rejects_oversized_sentence);
+    RUN_TEST(test_assembler_completes_a_sentence_on_the_terminator);
+    RUN_TEST(test_assembler_reports_nothing_until_the_terminator);
+    RUN_TEST(test_assembler_restarts_on_a_dollar_sign);
+    RUN_TEST(test_assembler_discards_an_overlong_sentence);
+    RUN_TEST(test_assembler_ignores_a_bare_terminator);
     return UNITY_END();
 }
