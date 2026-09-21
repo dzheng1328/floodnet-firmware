@@ -1,7 +1,7 @@
 # FloodNet Milestone 2: Interrupt-Driven Acquisition
 
 Date: 2026-09-21
-Status: approved, pending implementation
+Status: implemented
 Parent spec: `docs/superpowers/specs/2026-09-20-floodnet-firmware-design.md`
 
 ## Purpose
@@ -249,6 +249,13 @@ The `polling / 64 B` row must reproduce the milestone 1 figures exactly.
 If it does not, the measurement changed and the comparison is invalid until that is explained.
 
 The README gains a comparison table replacing the single-strategy results table, and keeps the existing reproduction command.
+
+**Result.**
+The SF7 prediction above did not hold.
+This spec predicted removing the IMU read from the transmit path would raise the interrupt build's SF7 ceiling to approximately 10.87 packets/sec, ahead of the polling baseline.
+The measured figures are `polling,4096,SF7` at 9.79 packets/sec against `interrupt,64/4096,SF7` at 9.07 packets/sec: the interrupt build is slower, not faster, at SF7.
+The deep-buffer polling build is the fastest SF7 configuration measured.
+This spec committed to publishing whatever the benchmark produced, and this is what it produced; see the README's Results section for the reading of it.
 
 ## Testing
 
