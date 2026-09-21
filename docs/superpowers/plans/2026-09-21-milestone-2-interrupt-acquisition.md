@@ -2462,12 +2462,28 @@ void test_baseline_row_still_reproduces_milestone_one(void) {
     TEST_ASSERT_TRUE(control.packets_per_sec > sf12.packets_per_sec);
 }
 
-void test_deep_buffer_alone_does_not_rescue_a_blocking_loop(void) {
-    // A bigger buffer helps a loop that stalls 92 ms. It cannot help one that
-    // stalls 3023 ms, because 3023 ms at 960 B/s overruns anything this size.
+void test_deep_buffer_alone_eliminates_gps_byte_loss(void) {
+    // This test originally asserted the opposite, and the plan was wrong by
+    // its own arithmetic. The buffer was sized at 4096 bytes specifically to
+    // cover a full SF12 transmit -- 3023 ms at 0.96 B/ms is 2902 bytes -- and
+    // then this test claimed that same buffer would overflow.
+    //
+    // It does not. For GPS byte loss alone, a deeper receive buffer is
+    // sufficient and the non-blocking loop is not required. That is the
+    // milestone's least comfortable result, and it is asserted here rather
+    // than left out.
+    //
+    // All three profiles run so the matrix is complete: without the SF7 row in
+    // particular, the improvement from 5.99 to 9.07 packets/sec could not be
+    // attributed between the deeper buffer and the non-blocking loop, which is
+    // the entire reason this benchmark is a 2x2.
+    BenchResult control = run_polling("CONTROL", kDeepBuffer, kImuControlMs, kRadioControlMs);
+    BenchResult sf7 = run_polling("SF7", kDeepBuffer, kImuReadMs, kRadioSf7Ms);
     BenchResult sf12 = run_polling("SF12", kDeepBuffer, kImuReadMs, kRadioSf12Ms);
 
-    TEST_ASSERT_GREATER_THAN_UINT16(0, sf12.overflows);
+    TEST_ASSERT_EQUAL_UINT16(0, control.overflows);
+    TEST_ASSERT_EQUAL_UINT16(0, sf7.overflows);
+    TEST_ASSERT_EQUAL_UINT16(0, sf12.overflows);
 }
 
 void test_non_blocking_alone_helps_but_the_shallow_buffer_still_bites(void) {
@@ -2524,7 +2540,7 @@ Replace `main()` with:
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_baseline_row_still_reproduces_milestone_one);
-    RUN_TEST(test_deep_buffer_alone_does_not_rescue_a_blocking_loop);
+    RUN_TEST(test_deep_buffer_alone_eliminates_gps_byte_loss);
     RUN_TEST(test_non_blocking_alone_helps_but_the_shallow_buffer_still_bites);
     RUN_TEST(test_milestone_two_configuration_loses_no_gps_bytes);
     RUN_TEST(test_control_profile_is_a_null_control);
@@ -2766,9 +2782,25 @@ Reporting a single before-and-after would not say which change bought what.
 
 Three things to read out of it:
 
-1. **A deeper buffer alone does not rescue a blocking loop.** At SF12 the loop stalls for 3023 ms, and 3023 ms at 960 bytes per second overruns any buffer of this size.
-2. **GPS byte loss goes to zero in the milestone 2 configuration, at every profile.** That is the milestone's core result.
-3. **At SF12, total data delivered barely moves, and that is expected.** The polling baseline already ran at roughly 97% of the radio's airtime ceiling. What changed is not how much is lost but what kind of loss it is: silent, byte-level corruption of an unknown number of sentences became explicit, counted packet drops with a visible sequence gap. Throughput improves at SF7, where there was real headroom.
+**This section must be written from the measured rows, and the measurements refuted two of the three things this plan originally predicted.** Write what follows, not the earlier draft.
+
+1. **Either change alone eliminates GPS byte loss. They are redundant for that purpose.**
+   Polling with a 4096-byte buffer reports zero overflows at all three profiles, and the interrupt build reports zero at both buffer depths.
+   The plan predicted a deeper buffer could not rescue a blocking loop at SF12; that was wrong by its own arithmetic, since the buffer was sized at 4096 bytes specifically to cover 3023 ms x 0.96 B/ms = 2902 bytes.
+   "Interrupt-driven acquisition eliminated the data loss" is not a claim this data supports. A bigger `HardwareSerial` buffer would have done it.
+
+2. **At SF7 the deeper buffer alone is the fastest configuration measured, and faster than the interrupt build.**
+   Polling at 4096 reaches 9.79 packets/sec against the interrupt build's 9.07 at either depth, from a 5.99 baseline.
+   The milestone's throughput claim is therefore withdrawn rather than softened.
+
+3. **At SF12 nothing moves the packet rate**, because the radio is the bottleneck: every configuration lands between 0.32 and 0.33 packets/sec.
+
+**What the non-blocking loop actually buys**, none of which is throughput:
+
+- At SF12, 831 counted packet drops replace 56948 silent byte-level overflows. The loss is the same physics; what changes is that it is explicit, chosen by a stated policy, and attributable.
+- Sequence numbers are assigned when a fix is queued rather than when it is sent, so a receiver sees a gap and can count what the node discarded.
+- The outbound queue keeps the freshest fix rather than the oldest, which matters for position data.
+- The loop is free to do other work. Milestones 3 through 5 need relay, duty cycling and sleep, and a superloop that blocks for three seconds on a transmit structurally cannot host them.
 
 CONTROL is a null control rather than a result.
 It is limited by the GPS sentence rate, not the radio, so a non-blocking loop has nothing to win there.
@@ -2793,6 +2825,19 @@ No CPU cost per byte parsed or packet encoded is charged to either sampler.
 That was a deliberate choice. On a 600 MHz Teensy 4.1 those costs sit roughly four orders of magnitude below the 3023 ms of airtime that dominates the result, so modelling them would mean inventing constants in order to change nothing.
 
 The consequence is a narrower claim than it may first appear: these figures show that **blocking was the loss mechanism**. They do not show that the Teensy has the cycles to keep up. Establishing that needs hardware, which milestone 2 did not have.
+
+### Why the interrupt build is slower at SF7
+
+`FakeImu` charges a 10 ms read on nearly every pass, and the interrupt sampler detects transmit completion only at pass boundaries, so a completion is noticed up to 10 ms late.
+The polling loop serialises the IMU read and the transmit (92 + 10 = 102 ms, a 9.80/sec ceiling) but never spends a pass without making progress.
+
+A real BNO055 read over I2C at 400 kHz is closer to 1 ms than 10 ms, at which point the two builds would be near-identical.
+That 10 ms figure was not changed, because it is milestone 1's published value and altering it would invalidate the baseline this milestone is measured against.
+
+Calling `service_radio()` before `collect_imu()` would detect completion sooner and would likely close the gap.
+It has deliberately not been done.
+It was identified only after seeing a result that disfavoured the design, and changing code to improve a number after seeing that number is tuning to the benchmark.
+It is recorded here as future work so that "did anything change after you saw the results?" has a one-word answer.
 
 ### Not validated on hardware
 
