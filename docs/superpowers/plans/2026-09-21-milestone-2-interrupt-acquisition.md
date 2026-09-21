@@ -682,13 +682,18 @@ void test_wait_for_event_returns_at_once_when_data_is_already_waiting(void) {
 
 void test_wait_for_event_advances_time_until_data_arrives(void) {
     SimClock clock;
-    FakeGps gps("$GPGGA\r\n", 0.1);  // one byte every 10 ms
+    // 0.125 is 2^-3 and therefore exact in binary floating point. FakeGps
+    // accumulates `pending_ += elapsed_ms * bytes_per_ms_` and pushes a byte
+    // when that reaches 1.0, so an inexact rate accumulates rounding error:
+    // 0.1 summed ten times gives 0.9999999999999999 and the byte lands on
+    // tick 11, not 10. Use a rate the accumulator can represent exactly.
+    FakeGps gps("$GPGGA\r\n", 0.125);  // one byte every 8 ms, exactly
     clock.add_observer(&gps);
 
     clock.wait_for_event(50);
 
     // Woke as soon as the first byte landed, not at the cap.
-    TEST_ASSERT_EQUAL_UINT32(10, clock.now_ms());
+    TEST_ASSERT_EQUAL_UINT32(8, clock.now_ms());
     TEST_ASSERT_EQUAL_INT('$', gps.read_byte());
 }
 
@@ -755,11 +760,18 @@ In `src/hal/teensy_clock.hpp`, add to `TeensyClock`:
         // rather than something this implementation enforces with a timer,
         // which is why the parameter is unused: the caller's loop re-checks
         // its sources and calls again.
-        __WFI();
+        //
+        // Raw instruction rather than CMSIS __WFI(): that macro lives in
+        // core_cmInstr.h, which nothing in Arduino.h's include chain reaches
+        // on this platform (imxrt.h includes only <stdint.h>). The Teensy 4
+        // core itself does exactly this, in avr/sleep.h's sleep_cpu().
+        //
+        // The memory clobber matters. An interrupt handler is what wakes this,
+        // and it is what writes the flags the caller checks on return, so the
+        // compiler must not hoist those loads above the sleep.
+        __asm__ volatile("wfi" ::: "memory");
     }
 ```
-
-If `__WFI` is not declared, add `#include <imxrt.h>`; the Teensy 4 core exposes it through CMSIS.
 
 - [ ] **Step 5: Implement it in the simulation**
 
