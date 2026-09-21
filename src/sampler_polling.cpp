@@ -29,8 +29,7 @@ void PollingSampler::collect_gps_bytes(GpsFix *fix, bool *have_fix) {
             return;  // The receive buffer is genuinely empty, not merely mid-sentence.
         }
 
-        // Keep draining even after a complete sentence: leaving bytes behind
-        // would cost us the next stall.
+        // Not a complete sentence yet: take the next byte.
         if (!line_.feed(static_cast<char>(value))) {
             continue;
         }
@@ -41,6 +40,13 @@ void PollingSampler::collect_gps_bytes(GpsFix *fix, bool *have_fix) {
             *fix = parsed;
             *have_fix = true;
         }
+
+        // Deliberately no return here. Draining continues until read_byte()
+        // reports the buffer genuinely empty, because bytes left behind would
+        // be lost during the next blocking stall - which is the whole defect
+        // this sampler exists to demonstrate. An early return after a
+        // completed sentence would look like a tidy-up and would silently
+        // change what this file measures.
     }
 }
 
