@@ -145,6 +145,40 @@ void test_gps_deeper_buffer_absorbs_what_the_default_loses(void) {
     TEST_ASSERT_EQUAL_UINT16(0, gps.rx_overflows());
 }
 
+void test_imu_starts_ready_so_the_first_read_needs_no_wait(void) {
+    SimClock clock;
+    FakeImu imu(clock, 2);
+    clock.add_observer(&imu);
+
+    TEST_ASSERT_TRUE(imu.data_ready());
+}
+
+void test_imu_read_clears_data_ready(void) {
+    SimClock clock;
+    FakeImu imu(clock, 0);  // free read, so no sample arrives during it
+    clock.add_observer(&imu);
+
+    ImuSample sample;
+    TEST_ASSERT_TRUE(imu.read(&sample));
+    TEST_ASSERT_FALSE(imu.data_ready());
+}
+
+void test_imu_becomes_ready_again_at_one_hundred_hertz(void) {
+    SimClock clock;
+    FakeImu imu(clock, 0);
+    clock.add_observer(&imu);
+
+    ImuSample sample;
+    TEST_ASSERT_TRUE(imu.read(&sample));
+    TEST_ASSERT_FALSE(imu.data_ready());
+
+    clock.delay_ms(9);
+    TEST_ASSERT_FALSE(imu.data_ready());
+
+    clock.delay_ms(1);  // 10 ms since the read
+    TEST_ASSERT_TRUE(imu.data_ready());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_clock_advances_on_delay);
@@ -158,5 +192,8 @@ int main(int, char **) {
     RUN_TEST(test_wait_for_event_advances_even_with_no_observers);
     RUN_TEST(test_gps_default_depth_matches_milestone_one);
     RUN_TEST(test_gps_deeper_buffer_absorbs_what_the_default_loses);
+    RUN_TEST(test_imu_starts_ready_so_the_first_read_needs_no_wait);
+    RUN_TEST(test_imu_read_clears_data_ready);
+    RUN_TEST(test_imu_becomes_ready_again_at_one_hundred_hertz);
     return UNITY_END();
 }
