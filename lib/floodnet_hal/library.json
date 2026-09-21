@@ -1,0 +1,6 @@
+{
+  "name": "floodnet_hal",
+  "version": "0.1.0",
+  "description": "Hardware abstraction interfaces for FloodNet",
+  "build": { "flags": ["-I include"] }
+}
