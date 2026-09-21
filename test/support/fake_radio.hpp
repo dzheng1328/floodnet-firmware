@@ -23,6 +23,20 @@ class FakeRadio : public IAsyncRadio, public ISimTick {
     }
 
     bool transmit(const uint8_t *data, size_t len) override {
+        // The blocking and async paths must not be mixed on one instance.
+        // This call's delay_ms ticks every observer, including this radio
+        // when it is registered as one, so an in-flight begin_transmit would
+        // complete as a side effect and then have its payload overwritten
+        // below.
+        //
+        // Refusing rather than asserting, and rather than proceeding: every
+        // caller already branches on this return (see
+        // src/sampler_polling.cpp:91), so a refusal shows up as an
+        // uncounted packet rather than a corrupted measurement. It also
+        // matches begin_transmit(), which refuses-when-busy the same way.
+        if (busy_) {
+            return false;
+        }
         if (len > sizeof(last_payload_)) {
             return false;
         }
