@@ -99,7 +99,9 @@ Additional handling:
 - NMEA sentences failing checksum validation are discarded and counted.
 - Radio transmit and receive operations carry timeouts.
 - A hardware watchdog resets a node that stops making progress.
-- Ring buffer overflow drops the oldest data and increments the counter rather than blocking the producer, because the producer may be an interrupt handler.
+- Ring buffer overflow discards data and increments a counter rather than blocking the producer, because the producer may be an interrupt handler.
+  This originally said the *oldest* data is dropped, which is not implementable in a lock-free SPSC buffer: it would require the producer to advance the consumer's index.
+  The newest element is dropped instead. See `2026-09-21-milestone-2-interrupt-acquisition-design.md`, "Corrections to the parent spec".
 
 ## Measurement
 
@@ -156,7 +158,7 @@ Each milestone is a self-contained increment leaving the repository in a working
    Project skeleton, HAL interfaces with both implementations, sensor drivers, NMEA parser, packet codec, mesh relay, blocking superloop over a single shared buffer, host unit tests, continuous integration.
    Complete and functional, with the data loss characteristic latent rather than disguised.
 
-2. **Interrupt-driven acquisition.**
+2. **Interrupt-driven acquisition.** Designed in `2026-09-21-milestone-2-interrupt-acquisition-design.md`.
    Per-stream SPSC ring buffers, a non-blocking drain that replaces the blocking waits on the already-ISR-served GPS and radio paths, a new interrupt path for the IMU data-ready line, the second build environment, drop counters surfaced in the packet stream.
 
 3. **Power management.**
