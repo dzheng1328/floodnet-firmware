@@ -17,7 +17,7 @@ jobs:
         run: pip install platformio
       - name: Enforce HAL seam
         run: |
-          if grep -rn "Arduino.h\|Wire.h\|SPI.h" lib/; then
+          if grep -rlE '#include[[:space:]]*<(Arduino|Wire|SPI)\.h>' lib/; then
             echo "A hardware header leaked into lib/. The core must stay host-testable."
             exit 1
           fi

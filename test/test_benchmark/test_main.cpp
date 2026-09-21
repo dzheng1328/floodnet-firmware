@@ -78,8 +78,22 @@ void test_benchmark_profiles_are_ordered_correctly(void) {
     TEST_ASSERT_EQUAL_UINT16(0, control.overflows);
     TEST_ASSERT_GREATER_THAN_UINT16(0, sf7.overflows);
     TEST_ASSERT_GREATER_THAN_UINT16(0, sf12.overflows);
-    TEST_ASSERT_GREATER_THAN(sf7.overflows_per_sec, sf12.overflows_per_sec);
-    TEST_ASSERT_GREATER_THAN(sf12.packets_per_sec, control.packets_per_sec);
+
+    // FakeGps saturates its counter at 0xFFFF. If this ever trips, the
+    // benchmark duration has outgrown the counter and the published
+    // overflow figures are clipped rather than measured.
+    TEST_ASSERT_LESS_THAN_UINT16(0xFFFF, control.overflows);
+    TEST_ASSERT_LESS_THAN_UINT16(0xFFFF, sf7.overflows);
+    TEST_ASSERT_LESS_THAN_UINT16(0xFFFF, sf12.overflows);
+
+    // Not TEST_ASSERT_GREATER_THAN: Unity expands that macro to an int
+    // comparison (UNITY_TEST_ASSERT_GREATER_THAN_INT), which truncates these
+    // double rates before comparing. That happens to pass today only because
+    // the compared magnitudes straddle integer boundaries; a retune that put
+    // two rates in the same integer bucket would pass here while failing to
+    // hold the real, sub-1 precision ordering. Compare the doubles directly.
+    TEST_ASSERT_TRUE(sf12.overflows_per_sec > sf7.overflows_per_sec);
+    TEST_ASSERT_TRUE(control.packets_per_sec > sf12.packets_per_sec);
 }
 
 int main(int, char **) {
