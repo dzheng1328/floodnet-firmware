@@ -15,6 +15,12 @@ jobs:
           python-version: '3.12'
       - name: Install PlatformIO
         run: pip install platformio
+      - name: Enforce HAL seam
+        run: |
+          if grep -rn "Arduino.h\|Wire.h\|SPI.h" lib/; then
+            echo "A hardware header leaked into lib/. The core must stay host-testable."
+            exit 1
+          fi
       - name: Run unit tests
         run: pio test -e native
 
