@@ -166,9 +166,9 @@ GPS receive buffer: 4096 bytes, supplied to `HardwareSerial` rather than impleme
 Covering the worst stall this firmware can program, 3023 ms of SF12 airtime, requires approximately 2902 bytes.
 The next power of two is 4096, which is 4 KB against the Teensy 4.1's 1 MB of RAM.
 
-IMU ring: 16 samples.
-`SamplePairer` consumes only the newest sample, so additional depth buys nothing.
-IMU ring overflow is therefore expected and benign in normal operation, which is precisely why it must be counted separately from GPS overflow rather than folded into a single drop figure.
+IMU: no buffer at all.
+`SamplePairer` consumes only the newest sample, so depth buys nothing, and the interrupt handler produces a flag rather than a sample.
+A flag set in interrupt context and read in main context is one `volatile bool`, not a queue.
 
 Outbound packet queue: 8 packets, and it drops the **oldest**.
 
@@ -189,11 +189,14 @@ Three distinct counters, deliberately not merged:
 | Counter | Meaning | Expected in the interrupt build |
 |---|---|---|
 | `gps_rx_overflows` | Bytes lost before the parser saw them | Zero. This going to zero is the milestone's core result. |
-| `imu_ring_overflows` | Samples discarded because only the newest is used | Non-zero and benign by design |
 | `tx_queue_drops` | Complete packets the node chose not to send | Non-zero at SF12. This is the honest cost. |
 
 Collapsing these into one number would make the interrupt build look lossy at SF12 for a reason that has nothing to do with acquisition.
 Keeping them separate is what makes the result readable.
+
+An earlier draft of this table carried a third counter, `imu_ring_overflows`, for samples discarded because only the newest is used.
+It is gone because the IMU ring it counted is gone: the path is a flag set by an interrupt plus a read in main context, which needs no queue and therefore discards nothing.
+That leaves `tx_queue_drops` as the only new counter, and it stays out of band for this milestone.
 
 ## What this milestone claims
 
