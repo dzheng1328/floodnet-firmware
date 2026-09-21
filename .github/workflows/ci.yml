@@ -35,4 +35,4 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
       - name: Build node and gateway
-        run: pio run -e node_polling -e gateway
+        run: pio run -e node_polling -e node_interrupt -e gateway
