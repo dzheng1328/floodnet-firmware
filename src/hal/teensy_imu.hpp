@@ -39,7 +39,14 @@ class TeensyImu : public IImuSource {
         }
         // Prime the first read so bring-up does not wait a tick for it.
         s_sample_due = true;
-        timer_.begin(on_sample_due, SAMPLE_PERIOD_US);
+        if (!timer_.begin(on_sample_due, SAMPLE_PERIOD_US)) {
+            // No hardware timer available. Report the failure rather than
+            // running with a flag nothing will ever set again: without this,
+            // the first read() clears s_sample_due and data_ready() reports
+            // false for the life of the node, with no error anywhere.
+            ready_ = false;
+            return false;
+        }
         return true;
     }
 
