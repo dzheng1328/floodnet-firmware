@@ -18,10 +18,7 @@ PollingSampler::PollingSampler(IGpsSource &gps, IImuSource &imu, IRadio &radio, 
       ttl_(ttl),
       seq_(0),
       packets_sent_(0),
-      diag_(),
-      line_len_(0) {
-    line_[0] = '\0';
-}
+      diag_() {}
 
 void PollingSampler::collect_gps_bytes(GpsFix *fix, bool *have_fix) {
     *have_fix = false;
@@ -32,29 +29,17 @@ void PollingSampler::collect_gps_bytes(GpsFix *fix, bool *have_fix) {
             return;  // The receive buffer is genuinely empty, not merely mid-sentence.
         }
 
-        const char c = static_cast<char>(value);
-        if (c == '$') {
-            line_len_ = 0;
+        // Keep draining even after a complete sentence: leaving bytes behind
+        // would cost us the next stall.
+        if (!line_.feed(static_cast<char>(value))) {
+            continue;
         }
 
-        if (c == '\r' || c == '\n') {
-            if (line_len_ > 0) {
-                line_[line_len_] = '\0';
-                GpsFix parsed;
-                if (parse_gga(line_, line_len_, clock_.now_ms(), &parsed) && parsed.valid) {
-                    *fix = parsed;
-                    *have_fix = true;
-                }
-                line_len_ = 0;
-            }
-            continue;  // Keep draining: leaving bytes behind would cost us the next stall.
-        }
-
-        if (line_len_ < NMEA_MAX_SENTENCE) {
-            line_[line_len_++] = c;
-        } else {
-            // Overlong sentence: discard and resynchronise on the next '$'.
-            line_len_ = 0;
+        GpsFix parsed;
+        if (parse_gga(line_.sentence(), line_.length(), clock_.now_ms(), &parsed) &&
+            parsed.valid) {
+            *fix = parsed;
+            *have_fix = true;
         }
     }
 }
