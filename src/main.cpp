@@ -4,6 +4,7 @@
 #include "hal/teensy_gps.hpp"
 #include "hal/teensy_imu.hpp"
 #include "hal/teensy_radio.hpp"
+#include "radio_config.hpp"
 #include "sampler_polling.hpp"
 
 namespace {
@@ -11,12 +12,12 @@ namespace {
 const uint16_t NODE_ID = 1;
 const uint8_t PACKET_TTL = 3;
 const uint32_t GPS_BAUD = 9600;
-const float RADIO_FREQUENCY_MHZ = 915.0f;
-const int8_t RADIO_TX_POWER_DBM = 20;
 
-const uint8_t RADIO_CS_PIN = 10;
-const uint8_t RADIO_RESET_PIN = 9;
-const uint8_t RADIO_DIO0_PIN = 2;
+using floodnet::RADIO_CS_PIN;
+using floodnet::RADIO_DIO0_PIN;
+using floodnet::RADIO_FREQUENCY_MHZ;
+using floodnet::RADIO_RESET_PIN;
+using floodnet::RADIO_TX_POWER_DBM;
 
 floodnet::TeensyClock g_clock;
 floodnet::TeensyGps g_gps(Serial1);

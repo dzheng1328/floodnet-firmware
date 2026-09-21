@@ -43,7 +43,12 @@ class TeensyRadio : public IRadio {
         if (!driver_.send(data, static_cast<uint8_t>(len))) {
             return false;
         }
-        return driver_.waitPacketSent();
+        // Radio operations must carry timeouts (spec, Error handling). Size
+        // generously against the worst case this firmware can program: SF12
+        // airtime for a 45-byte packet is about 3.0 s (see
+        // test/test_polling/test_main.cpp), so 5000 ms leaves headroom without
+        // blocking indefinitely on a wedged modem.
+        return driver_.waitPacketSent(5000);
     }
 
     int receive(uint8_t *buf, size_t len) override {

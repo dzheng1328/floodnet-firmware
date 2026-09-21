@@ -4,19 +4,24 @@
 #include <floodnet/packet.hpp>
 
 #include "hal/teensy_radio.hpp"
+#include "radio_config.hpp"
 
 namespace {
 
-const float RADIO_FREQUENCY_MHZ = 915.0f;
-const int8_t RADIO_TX_POWER_DBM = 20;
-
-const uint8_t RADIO_CS_PIN = 10;
-const uint8_t RADIO_RESET_PIN = 9;
-const uint8_t RADIO_DIO0_PIN = 2;
+using floodnet::RADIO_CS_PIN;
+using floodnet::RADIO_DIO0_PIN;
+using floodnet::RADIO_FREQUENCY_MHZ;
+using floodnet::RADIO_RESET_PIN;
+using floodnet::RADIO_TX_POWER_DBM;
 
 floodnet::TeensyRadio g_radio(RADIO_CS_PIN, RADIO_DIO0_PIN, RADIO_RESET_PIN);
 floodnet::DedupTable g_dedup;
-uint16_t g_crc_errors = 0;
+// decode_packet() rejects on bad magic, bad version, or bad CRC and returns a
+// single bool, so the three causes are not distinguishable through its
+// current return type. Naming this "decode" rather than "crc" avoids
+// claiming a cause we cannot actually identify. Separating the three is a
+// later milestone's job if it proves necessary.
+uint16_t g_decode_errors = 0;
 uint16_t g_short_reads = 0;
 
 /// One line per packet, comma separated, so the host pipeline can read it
@@ -47,7 +52,11 @@ void print_record(const floodnet::Packet &p, int16_t rssi) {
     Serial.print(',');
     Serial.print(p.record.diag.crc_errors);
     Serial.print(',');
-    Serial.println(rssi);
+    Serial.print(rssi);
+    Serial.print(',');
+    Serial.print(p.record.gps.valid ? 1 : 0);
+    Serial.print(',');
+    Serial.println(p.record.imu.valid ? 1 : 0);
 }
 
 }  // namespace
@@ -79,11 +88,11 @@ void loop() {
 
     floodnet::Packet packet;
     if (!floodnet::decode_packet(buffer, floodnet::PACKET_SIZE, &packet)) {
-        if (g_crc_errors < 0xFFFF) {
-            ++g_crc_errors;
+        if (g_decode_errors < 0xFFFF) {
+            ++g_decode_errors;
         }
-        Serial.print("ERR,crc,");
-        Serial.println(g_crc_errors);
+        Serial.print("ERR,decode,");
+        Serial.println(g_decode_errors);
         return;
     }
 
