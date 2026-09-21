@@ -103,6 +103,27 @@ Head and tail are `std::atomic<uint32_t>` with acquire/release ordering, which i
 The buffer exposes a drop counter and a high-water mark.
 The high-water mark is free to maintain and is what an embedded reviewer actually wants to see, so it is reported alongside the rates rather than kept internal.
 
+This buffer backs the IMU sample path and the outbound packet queue.
+It does **not** back the GPS path, for the reason given in the next section.
+
+### The GPS path is not a ring buffer
+
+The parent spec calls for "per-stream SPSC ring buffers", and for GPS that is not implementable as written.
+
+On Teensy, `HardwareSerial` owns the UART receive interrupt and fills its own 64-byte software buffer.
+Firmware in this repository does not own that interrupt and cannot insert a ring buffer ahead of it.
+A hand-rolled SPSC ring on the GPS path would sit *behind* the 64-byte buffer, drained from main context, and would receive bytes that were already lost.
+It would add a data structure without fixing anything.
+
+The correct mechanism on this platform is `HardwareSerial::addMemoryForRead(void *buffer, size_t length)`, confirmed present at `cores/teensy4/HardwareSerial.h:259` in the pinned framework.
+It hands the existing interrupt handler a larger array to fill.
+`TeensyGps::begin()` supplies a 4096-byte static buffer through it.
+
+`FakeGps`'s FIFO depth, currently hardcoded at 64, becomes a constructor parameter so the simulation can model both the milestone 1 and milestone 2 buffer sizes.
+
+The alternative, reimplementing the LPUART interrupt with `attachInterruptVector` so the ring is genuinely ours end to end, was rejected.
+It reimplements a core peripheral driver, gains nothing measurable over the framework's own mechanism, and cannot be exercised without hardware this milestone does not have.
+
 ### floodnet_hal
 
 `IClock` gains `wait_for_event(uint32_t max_ms)`.
@@ -128,7 +149,7 @@ It never blocks.
 
 Both are derived rather than chosen.
 
-GPS ring: 4096 bytes.
+GPS receive buffer: 4096 bytes, supplied to `HardwareSerial` rather than implemented here.
 9600 baud 8N1 is 960 bytes per second.
 Covering the worst stall this firmware can program, 3023 ms of SF12 airtime, requires approximately 2902 bytes.
 The next power of two is 4096, which is 4 KB against the Teensy 4.1's 1 MB of RAM.
@@ -194,8 +215,23 @@ CI builds `node_polling`, `node_interrupt`, and `gateway`, and runs the native s
 
 ## Measurement
 
-`test/test_benchmark/` runs both samplers across all three existing radio profiles and prints one line per combination in the form `BENCH,strategy,profile,...`, extending the current stable greppable format with a strategy column.
+Milestone 2 changes two independent things: the loop stops blocking, and the GPS receive buffer grows from 64 to 4096 bytes.
+Reporting them as one lumped improvement would leave the obvious question unanswered, so the benchmark separates them.
+
+`test/test_benchmark/` runs a 2x2 across all three radio profiles:
+
+| Strategy | GPS buffer | What it isolates |
+|---|---|---|
+| polling | 64 B | The milestone 1 baseline, unchanged |
+| polling | 4096 B | What a deeper buffer alone buys a blocking loop |
+| interrupt | 64 B | What a non-blocking loop alone buys at the original buffer size |
+| interrupt | 4096 B | The milestone 2 configuration |
+
+Output is one line per combination in the form `BENCH,strategy,gps_buffer_bytes,profile,...`, extending the current stable greppable format.
 Buffer high-water marks are reported alongside packets per second and overflows per second.
+
+The `polling / 64 B` row must reproduce the milestone 1 figures exactly.
+If it does not, the measurement changed and the comparison is invalid until that is explained.
 
 The README gains a comparison table replacing the single-strategy results table, and keeps the existing reproduction command.
 
