@@ -179,6 +179,63 @@ void test_imu_becomes_ready_again_at_one_hundred_hertz(void) {
     TEST_ASSERT_TRUE(imu.data_ready());
 }
 
+void test_async_transmit_returns_without_spending_time(void) {
+    SimClock clock;
+    FakeRadio radio(clock, 92);
+    clock.add_observer(&radio);
+
+    const uint8_t payload[] = {1, 2, 3};
+    TEST_ASSERT_TRUE(radio.begin_transmit(payload, sizeof(payload)));
+
+    // The whole point: the caller got control back immediately.
+    TEST_ASSERT_EQUAL_UINT32(0, clock.now_ms());
+    TEST_ASSERT_TRUE(radio.tx_busy());
+    TEST_ASSERT_EQUAL_UINT(0, radio.sent_count());
+}
+
+void test_async_transmit_completes_after_the_airtime(void) {
+    SimClock clock;
+    FakeRadio radio(clock, 92);
+    clock.add_observer(&radio);
+
+    const uint8_t payload[] = {1, 2, 3};
+    TEST_ASSERT_TRUE(radio.begin_transmit(payload, sizeof(payload)));
+
+    clock.delay_ms(91);
+    TEST_ASSERT_TRUE(radio.tx_busy());
+    TEST_ASSERT_EQUAL_UINT(0, radio.sent_count());
+
+    clock.delay_ms(1);
+    TEST_ASSERT_FALSE(radio.tx_busy());
+    TEST_ASSERT_EQUAL_UINT(1, radio.sent_count());
+    TEST_ASSERT_EQUAL_UINT(3, radio.last_length());
+}
+
+void test_async_transmit_is_refused_while_one_is_in_flight(void) {
+    SimClock clock;
+    FakeRadio radio(clock, 92);
+    clock.add_observer(&radio);
+
+    const uint8_t payload[] = {1, 2, 3};
+    TEST_ASSERT_TRUE(radio.begin_transmit(payload, sizeof(payload)));
+    TEST_ASSERT_FALSE(radio.begin_transmit(payload, sizeof(payload)));
+
+    clock.delay_ms(92);
+    TEST_ASSERT_TRUE(radio.begin_transmit(payload, sizeof(payload)));
+}
+
+void test_blocking_transmit_still_works_unchanged(void) {
+    // PollingSampler and the gateway depend on this path. It must not have
+    // shifted, because the published milestone 1 figures were measured on it.
+    SimClock clock;
+    FakeRadio radio(clock, 60);
+
+    const uint8_t payload[] = {1, 2, 3};
+    TEST_ASSERT_TRUE(radio.transmit(payload, sizeof(payload)));
+    TEST_ASSERT_EQUAL_UINT32(60, clock.now_ms());
+    TEST_ASSERT_EQUAL_UINT(1, radio.sent_count());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_clock_advances_on_delay);
@@ -195,5 +252,9 @@ int main(int, char **) {
     RUN_TEST(test_imu_starts_ready_so_the_first_read_needs_no_wait);
     RUN_TEST(test_imu_read_clears_data_ready);
     RUN_TEST(test_imu_becomes_ready_again_at_one_hundred_hertz);
+    RUN_TEST(test_async_transmit_returns_without_spending_time);
+    RUN_TEST(test_async_transmit_completes_after_the_airtime);
+    RUN_TEST(test_async_transmit_is_refused_while_one_is_in_flight);
+    RUN_TEST(test_blocking_transmit_still_works_unchanged);
     return UNITY_END();
 }
