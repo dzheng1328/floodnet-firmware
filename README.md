@@ -37,8 +37,9 @@ pio test -e native         # unit tests, no hardware needed
 ## Wire format
 
 45 bytes, little-endian, CRC16-CCITT-FALSE over the first 43.
-Carries a node identifier, a sequence number, a TTL, a GPS fix, an IMU sample, and the node's drop and CRC error counters.
-Those counters travel in-band deliberately: a receiver can see loss at the source rather than inferring it from gaps.
+Carries a node identifier, a sequence number, a TTL, a GPS fix, an IMU sample, and the node's drop counter.
+That counter travels in-band deliberately: a receiver can see loss at the source rather than inferring it from gaps.
+A second counter reserved for CRC errors travels alongside it but is always zero in milestone 1, since a node only transmits and never decodes a CRC of its own; see the byte table below.
 
 The byte layout below is read directly from `encode_packet()` in `lib/floodnet_core/src/packet.cpp`, which is the only authoritative description of it.
 `test/test_packet/test_main.cpp` has a golden-vector test, `test_golden_vector_pins_byte_layout`, that encodes a fully specified packet and asserts the exact 45 bytes.
@@ -80,6 +81,7 @@ REC,node_id,seq,gps_time_ms,lat_1e7,lon_1e7,alt_mm,satellites,yaw_cd,pitch_cd,ro
 
 `gps_valid` and `imu_valid` are appended at the end rather than inserted among the existing fields, so the field order a consumer already depends on stays stable.
 Each is `1` or `0`.
+`crc_errors` is always `0` here in milestone 1, for the same reason it is reserved in the wire format: a node only transmits and never decodes a CRC of its own.
 `imu_valid` is `0` when `SamplePairer::pair` could not find an IMU sample within the pairing skew budget; without this flag, an unpaired record's `yaw_cd,pitch_cd,roll_cd` of `0,0,0` is indistinguishable from a genuinely level node.
 
 A packet that fails to decode produces:
@@ -140,7 +142,7 @@ airtime = T_preamble + T_payload
 
 At SF12/BW125/CR4-8 this comes to approximately 3022.8 ms; at SF7/BW125/CR4-5, approximately 92.4 ms.
 
-`test/test_benchmark/test_main.cpp` runs each profile for a fixed 60 simulated seconds, rather than a fixed step count, so the three are directly comparable, and prints one line per profile in a stable, greppable format.
+`test/test_benchmark/test_main.cpp` runs each profile for at least 60 simulated seconds, rather than a fixed step count, so the three are directly comparable, and prints one line per profile in a stable, greppable format.
 These are simulated measurements from the host test suite, not field data.
 Reproduce them with:
 
@@ -171,19 +173,37 @@ Removing it is the next milestone.
 
 Framing milestone 1 versus a later interrupt-driven milestone as simply "polling versus interrupt-driven" overstates what changes, so this is worth stating precisely.
 
-The GPS path is already interrupt-served today: the Teensy UART receive interrupt fills the 64-byte software buffer described above, and the polling superloop only drains it with `read_byte()`.
+The GPS path is already interrupt-served today.
+The Teensy UART receive interrupt fills the 64-byte software buffer described above, and the polling superloop only drains it with `read_byte()`.
 What milestone 1 actually lacks on that path is a buffer deep enough to cover a multi-second stall, and a drain schedule that does not block on other sensors while bytes are arriving.
-The IMU data-ready line and the radio's DIO0 line, by contrast, genuinely are polled today: `TeensyImu::read()` and `TeensyRadio::receive()` both block or spin rather than reacting to an interrupt.
-Those two are where the next milestone adds interrupt paths that do not currently exist.
+
+The radio path is also already interrupt-served today.
+RadioHead's `RH_RF95::init()` attaches a hardware interrupt to the pin this firmware passes as `RADIO_DIO0_PIN`, and that interrupt sets `_rxBufValid` (the flag `available()` reads) on receive and clears `_mode` (the flag `waitPacketSent()` spins on) once transmission completes.
+What milestone 1 actually lacks on that path is that `TeensyRadio::transmit()` calls `waitPacketSent()`, which spins the superloop waiting on a completion the interrupt has already recorded, instead of returning to other work and being notified when it happens.
+
+The IMU is the one peripheral that is genuinely polled today.
+`TeensyImu::read()` performs a blocking I2C `getEvent()` call, and the BNO055 data-ready line is not wired to anything.
+This is the only path where the next milestone adds an interrupt that does not currently exist at all.
+
+Put together: two of the three peripherals already have interrupt service.
+The defect in milestone 1 is not an absence of interrupts; it is a superloop that blocks waiting on them anyway.
+Milestone 2's real change is making acquisition non-blocking and adding the one genuinely missing interrupt path, on the IMU.
 
 ## Deferred to later milestones
 
-- **Mesh relay.** `should_relay()` and `prepare_relay()` in `lib/floodnet_core/include/floodnet/mesh.hpp` are complete and unit-tested, but nothing outside `test/test_mesh/` calls them; no node currently relays another node's packet. Wiring receive-and-relay into the node loop needs a duty-cycle policy so nodes do not transmit over each other, and that policy belongs with the power management work planned for milestone 3.
-- **Ring buffer.** Deferred to milestone 2, alongside the interrupt-driven GPS receive path it is meant to back.
+- **Mesh relay.** `should_relay()` and `prepare_relay()` in `lib/floodnet_core/include/floodnet/mesh.hpp` are complete and unit-tested, but nothing outside `test/test_mesh/` calls them; no node currently relays another node's packet.
+  Wiring receive-and-relay into the node loop needs a duty-cycle policy so nodes do not transmit over each other, and that policy belongs with the power management work planned for milestone 3.
+- **Ring buffer.** Deferred to milestone 2, alongside the non-blocking drain path it is meant to back.
 - **Node state machine and sleep/duty cycling.** Deferred to milestone 3, alongside the mesh relay duty-cycle policy above.
-- **Sequence-gap counting.** Deferred to milestone 5. It is a receiver-side concern and belongs with the gateway/host tooling work planned there.
-- **Hardware watchdog.** The spec's error-handling section calls for a watchdog that resets a node that stops making progress; none exists yet. A node whose radio wedges currently stays dead until power-cycled. `TeensyRadio::transmit()`'s 5000 ms `waitPacketSent()` timeout (see Wire format and `src/hal/teensy_radio.hpp`) reduces that exposure but does not eliminate it, since nothing currently forces a reset if the node keeps retrying a dead radio indefinitely.
-- **Host HAL trace replay.** The design spec calls for a host HAL implementation that replays recorded sensor traces from disk. What shipped instead is the header-only synthetic fakes under `test/support/`, which repeat one hardcoded NMEA sentence at a fixed byte rate. That substitution is a reasonable milestone-1 choice, sufficient for the timing-driven tests this milestone needs, but it is not what the spec describes. Recorded-trace replay is planned to arrive with the hardware-in-the-loop tooling in milestone 4.
+- **Sequence-gap counting.** Deferred to milestone 5.
+  It is a receiver-side concern and belongs with the gateway/host tooling work planned there.
+- **Hardware watchdog.** The spec's error-handling section calls for a watchdog that resets a node that stops making progress; none exists yet.
+  A node whose radio wedges currently stays dead until power-cycled.
+  `TeensyRadio::transmit()`'s 5000 ms `waitPacketSent()` timeout (see Radio timing profiles and `src/hal/teensy_radio.hpp`) reduces that exposure but does not eliminate it, since nothing currently forces a reset if the node keeps retrying a dead radio indefinitely.
+- **Host HAL trace replay.** The design spec calls for a host HAL implementation that replays recorded sensor traces from disk.
+  What shipped instead is the header-only synthetic fakes under `test/support/`, which repeat one hardcoded NMEA sentence at a fixed byte rate.
+  That substitution is a reasonable milestone-1 choice, sufficient for the timing-driven tests this milestone needs, but it is not what the spec describes.
+  Recorded-trace replay is planned to arrive with the hardware-in-the-loop tooling in milestone 4.
 
 ## Hardware
 

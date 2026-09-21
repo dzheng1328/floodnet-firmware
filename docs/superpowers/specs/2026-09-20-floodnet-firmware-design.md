@@ -157,7 +157,7 @@ Each milestone is a self-contained increment leaving the repository in a working
    Complete and functional, with the data loss characteristic latent rather than disguised.
 
 2. **Interrupt-driven acquisition.**
-   Per-stream SPSC ring buffers, interrupt handlers for all three peripherals, the second build environment, drop counters surfaced in the packet stream.
+   Per-stream SPSC ring buffers, a non-blocking drain that replaces the blocking waits on the already-ISR-served GPS and radio paths, a new interrupt path for the IMU data-ready line, the second build environment, drop counters surfaced in the packet stream.
 
 3. **Power management.**
    Sleep modes and duty cycling driven by the node state machine.
