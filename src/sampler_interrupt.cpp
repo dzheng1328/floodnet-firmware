@@ -99,9 +99,17 @@ bool InterruptSampler::service_radio() {
 
     uint8_t buffer[PACKET_SIZE];
     if (encode_packet(packet, buffer, sizeof(buffer)) != PACKET_SIZE) {
+        // Unreachable with a PACKET_SIZE buffer, but returning here without
+        // the packet would leave a sequence gap no counter explains, which is
+        // exactly what this class promises not to do.
+        tx_queue_.push(packet);
         return false;
     }
     if (!radio_.begin_transmit(buffer, PACKET_SIZE)) {
+        // The radio refused. Requeue rather than drop silently: either a later
+        // pass sends it, or the queue discards it as the stalest entry and
+        // counts it in tx_queue_drops(). Both keep the accounting closed.
+        tx_queue_.push(packet);
         return false;
     }
 
@@ -128,6 +136,11 @@ void InterruptSampler::step() {
         // core sleep and in simulation is what allows time to advance.
         clock_.wait_for_event(IDLE_CAP_MS);
     }
+
+    // Sampled again here as well as at the top, matching PollingSampler, which
+    // reads it after its blocking calls. Without this the two builds report a
+    // field that travels in every packet on slightly different schedules.
+    diag_.drops = gps_.rx_overflows();
 }
 
 }  // namespace floodnet

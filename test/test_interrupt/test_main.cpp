@@ -13,8 +13,11 @@ using namespace floodnet;
 void setUp(void) {}
 void tearDown(void) {}
 
-// Same profiles as test/test_polling/, so the two suites describe the same
-// hardware and any difference between them is the sampler, not the setup.
+// Radio and IMU timings match test/test_polling/'s profiles, so any timing
+// difference between the two suites is the sampler, not the setup. The GPS
+// buffer here is FakeGps::MAX_FIFO_DEPTH, the milestone 2 configuration,
+// rather than test_polling's default depth - isolating that variable is the
+// benchmark's job in a later task.
 static const double kGpsByteRate = 0.96;
 static const char kSentence[] =
     "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47\r\n";
@@ -89,10 +92,18 @@ void test_sf12_drops_whole_packets_instead(void) {
 void test_dropped_packets_leave_visible_sequence_gaps(void) {
     // Sequence numbers are assigned when a fix is queued, not when it is sent,
     // so a receiver can see exactly how many observations the node discarded.
+    //
+    // Asserting the identity rather than just next_seq() > packets_sent():
+    // that weaker form passes even when seq_ is assigned at transmit time,
+    // because the single in-flight packet at the end of a run supplies the
+    // whole margin. The gap must be at least as large as the number of
+    // packets the queue actually threw away.
     Rig rig(kImuReadMs, kRadioSf12Ms, FakeGps::MAX_FIFO_DEPTH);
     rig.run_for(60000);
 
-    TEST_ASSERT_GREATER_THAN_UINT32(rig.sampler.packets_sent(), rig.sampler.next_seq());
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(
+        rig.sampler.tx_queue_drops(),
+        rig.sampler.next_seq() - rig.sampler.packets_sent());
 }
 
 void test_control_profile_loses_nothing_at_all(void) {
