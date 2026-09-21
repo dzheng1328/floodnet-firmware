@@ -10,8 +10,12 @@ The gateway validates what it receives and writes one line per observation to a 
 Milestone 2: interrupt-driven acquisition.
 The main loop no longer blocks on any peripheral, and both acquisition strategies remain selectable build targets so the comparison between them stays reproducible.
 
-Milestone 1's polling baseline is still built, still tested, and still measured on every run.
+Milestone 1's polling strategy is still built and tested as `node_polling`, and its original 64-byte-buffer baseline is still measured on every run, in the host simulation.
 See [Results](#results) for what changed and [Known limitations](#known-limitations) for what did not.
+
+**The two build targets differ in acquisition strategy, not in GPS buffer depth.**
+`TeensyGps` supplies its 4096-byte receive buffer unconditionally, so `node_polling` ships as polling with the deep buffer, not as the original milestone 1 configuration.
+The milestone 1 baseline, polling with the original 64-byte buffer, survives only as the `polling,64` row in the host simulation; see [Known limitations](#known-limitations).
 
 ## Layout
 
@@ -201,10 +205,17 @@ It is limited by the GPS sentence rate, not the radio, so a non-blocking loop ha
 
 ## Known limitations
 
-The polling loop blocks on the IMU and on radio transmission.
-GPS bytes arriving during those stalls land in a 64-byte software receive buffer, and when that buffer fills, they are gone.
+Milestone 1's polling loop blocked on the IMU and on radio transmission.
+GPS bytes arriving during those stalls landed in `HardwareSerial`'s default 64-byte software receive buffer, and when that buffer filled, they were gone.
 That buffer is not a passive hardware register: it is filled by the Teensy UART receive interrupt, and the polling loop's `read_byte()` only drains what the interrupt already collected.
 `test/test_polling/` asserts that this loss happens rather than papering over it, and the loss is reported in every outgoing packet's `drops` field, which carries the node's `IGpsSource::rx_overflows()` value.
+That fixture keeps the 64-byte depth so the `polling,64` benchmark row remains comparable with milestone 1.
+
+**`node_polling` as built today does not reproduce this.**
+`TeensyGps::begin()` in `src/hal/teensy_gps.hpp` calls `addMemoryForRead()` unconditionally, and `src/main.cpp` constructs the single `TeensyGps` instance outside the `FLOODNET_SAMPLER_INTERRUPT`/`FLOODNET_SAMPLER_POLLING` branch, so both build targets supply the same 4096-byte buffer.
+The two shipped firmware images therefore differ only in acquisition strategy (blocking vs. non-blocking), not in GPS buffer depth.
+The milestone 1 configuration, polling with a 64-byte buffer, exists only as the `polling,64` row in the host simulation below, not as anything you can flash.
+Someone who flashes `node_polling` expecting milestone 1's loss behaviour will not see it; they will see the `polling,4096` row instead.
 
 That counter's unit is implementation-defined, and the two implementations in this repository do not measure the same thing.
 The simulated GPS source in `test/support/fake_gps.hpp` counts one overflow per individual byte it discards, because it knows exactly what it threw away.
