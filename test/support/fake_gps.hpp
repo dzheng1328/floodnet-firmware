@@ -1,6 +1,7 @@
 #ifndef FLOODNET_TEST_FAKE_GPS_HPP
 #define FLOODNET_TEST_FAKE_GPS_HPP
 
+#include <assert.h>
 #include <string.h>
 
 #include <floodnet/hal/gps.hpp>
@@ -13,16 +14,31 @@ namespace floodnet {
 /// modelling a UART peripheral that discards bytes nobody collected.
 class FakeGps : public IGpsSource, public ISimTick {
   public:
-    FakeGps(const char *sentence, double bytes_per_ms)
+    /// Teensy 4.x HardwareSerial allocates a 64-byte software receive buffer.
+    /// At 9600 baud that holds roughly 66 ms of traffic, so a loop stalling
+    /// longer than that loses bytes. This is the milestone 1 configuration.
+    static const size_t DEFAULT_FIFO_DEPTH = 64;
+
+    /// The milestone 2 configuration, supplied to HardwareSerial through
+    /// addMemoryForRead(). Sized to cover a full SF12 transmit: 960 bytes per
+    /// second against 3023 ms is about 2902 bytes, rounded up to a power of two.
+    static const size_t MAX_FIFO_DEPTH = 4096;
+
+    FakeGps(const char *sentence, double bytes_per_ms,
+            size_t fifo_depth = DEFAULT_FIFO_DEPTH)
         : sentence_(sentence),
           sentence_len_(strlen(sentence)),
           source_index_(0),
           bytes_per_ms_(bytes_per_ms),
           pending_(0.0),
+          fifo_depth_(fifo_depth),
           head_(0),
           tail_(0),
           count_(0),
-          dropped_(0) {}
+          dropped_(0) {
+        assert(fifo_depth > 0 && fifo_depth <= MAX_FIFO_DEPTH &&
+               "FakeGps depth must be between 1 and MAX_FIFO_DEPTH");
+    }
 
     void on_tick(uint32_t elapsed_ms) override {
         pending_ += static_cast<double>(elapsed_ms) * bytes_per_ms_;
@@ -38,7 +54,7 @@ class FakeGps : public IGpsSource, public ISimTick {
             return -1;
         }
         const uint8_t value = fifo_[tail_];
-        tail_ = (tail_ + 1) % FIFO_DEPTH;
+        tail_ = (tail_ + 1) % fifo_depth_;
         --count_;
         return static_cast<int>(value);
     }
@@ -48,21 +64,15 @@ class FakeGps : public IGpsSource, public ISimTick {
     bool pending() const override { return count_ > 0; }
 
   private:
-    /// Matches the 64-byte software receive buffer Teensy 4.x HardwareSerial
-    /// keeps, which is the buffer `TeensyGps` watches for overflow. At 9600
-    /// baud it holds roughly 66 ms of traffic, so a loop that stalls longer
-    /// than that loses bytes.
-    static const size_t FIFO_DEPTH = 64;
-
     void push(char value) {
-        if (count_ == FIFO_DEPTH) {
+        if (count_ == fifo_depth_) {
             if (dropped_ < 0xFFFF) {
                 ++dropped_;
             }
             return;
         }
         fifo_[head_] = static_cast<uint8_t>(value);
-        head_ = (head_ + 1) % FIFO_DEPTH;
+        head_ = (head_ + 1) % fifo_depth_;
         ++count_;
     }
 
@@ -72,7 +82,8 @@ class FakeGps : public IGpsSource, public ISimTick {
     double bytes_per_ms_;
     double pending_;
 
-    uint8_t fifo_[FIFO_DEPTH];
+    size_t fifo_depth_;
+    uint8_t fifo_[MAX_FIFO_DEPTH];
     size_t head_;
     size_t tail_;
     size_t count_;

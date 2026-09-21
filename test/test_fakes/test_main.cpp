@@ -119,6 +119,32 @@ void test_wait_for_event_advances_even_with_no_observers(void) {
     TEST_ASSERT_EQUAL_UINT32(7, clock.now_ms());
 }
 
+void test_gps_default_depth_matches_milestone_one(void) {
+    SimClock clock;
+    FakeGps gps("$GPGGA\r\n", 1.0);
+    clock.add_observer(&gps);
+
+    // 64 bytes fit; the 65th onward are lost.
+    clock.delay_ms(64);
+    TEST_ASSERT_EQUAL_UINT16(0, gps.rx_overflows());
+    clock.delay_ms(10);
+    TEST_ASSERT_EQUAL_UINT16(10, gps.rx_overflows());
+}
+
+void test_gps_deeper_buffer_absorbs_what_the_default_loses(void) {
+    SimClock clock;
+    FakeGps gps("$GPGGA\r\n", 1.0, 4096);
+    clock.add_observer(&gps);
+
+    // The same 74 ms that overflowed the 64-byte buffer above.
+    clock.delay_ms(74);
+    TEST_ASSERT_EQUAL_UINT16(0, gps.rx_overflows());
+
+    // A full SF12 transmit still fits.
+    clock.delay_ms(3023);
+    TEST_ASSERT_EQUAL_UINT16(0, gps.rx_overflows());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_clock_advances_on_delay);
@@ -130,5 +156,7 @@ int main(int, char **) {
     RUN_TEST(test_wait_for_event_advances_time_until_data_arrives);
     RUN_TEST(test_wait_for_event_gives_up_at_the_cap);
     RUN_TEST(test_wait_for_event_advances_even_with_no_observers);
+    RUN_TEST(test_gps_default_depth_matches_milestone_one);
+    RUN_TEST(test_gps_deeper_buffer_absorbs_what_the_default_loses);
     return UNITY_END();
 }
