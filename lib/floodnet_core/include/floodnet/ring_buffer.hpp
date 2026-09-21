@@ -44,8 +44,9 @@ class RingBuffer {
 
         // Unsigned subtraction, so this stays correct across index wraparound.
         if (head - tail >= Capacity) {
-            if (drops_ < 0xFFFF) {
-                ++drops_;
+            uint16_t drop_count = drops_.load(std::memory_order_relaxed);
+            if (drop_count < 0xFFFF) {
+                drops_.store(drop_count + 1, std::memory_order_relaxed);
             }
             return false;
         }
@@ -56,8 +57,9 @@ class RingBuffer {
         head_.store(head + 1, std::memory_order_release);
 
         const size_t used = static_cast<size_t>(head + 1 - tail);
-        if (used > high_water_) {
-            high_water_ = used;
+        const size_t current_high_water = high_water_.load(std::memory_order_relaxed);
+        if (used > current_high_water) {
+            high_water_.store(used, std::memory_order_relaxed);
         }
         return true;
     }
@@ -86,12 +88,12 @@ class RingBuffer {
     }
 
     /// Elements discarded because the buffer was full, saturating at 65535.
-    /// Written by the producer only; read for diagnostics.
-    uint16_t drops() const { return drops_; }
+    /// Relaxed atomic: may be stale but prevents compiler caching.
+    uint16_t drops() const { return drops_.load(std::memory_order_relaxed); }
 
-    /// Deepest occupancy this buffer has reached. Written by the producer
-    /// only; read for diagnostics.
-    size_t high_water() const { return high_water_; }
+    /// Deepest occupancy this buffer has reached.
+    /// Relaxed atomic: may be stale but prevents compiler caching.
+    size_t high_water() const { return high_water_.load(std::memory_order_relaxed); }
 
     static size_t capacity() { return Capacity; }
 
@@ -101,8 +103,8 @@ class RingBuffer {
     T slots_[Capacity];
     std::atomic<uint32_t> head_;
     std::atomic<uint32_t> tail_;
-    uint16_t drops_;
-    size_t high_water_;
+    std::atomic<uint16_t> drops_;
+    std::atomic<size_t> high_water_;
 };
 
 }  // namespace floodnet
