@@ -103,8 +103,20 @@ Head and tail are `std::atomic<uint32_t>` with acquire/release ordering, which i
 The buffer exposes a drop counter and a high-water mark.
 The high-water mark is free to maintain and is what an embedded reviewer actually wants to see, so it is reported alongside the rates rather than kept internal.
 
-This buffer backs the IMU sample path and the outbound packet queue.
-It does **not** back the GPS path, for the reason given in the next section.
+**This buffer is not on any data path in milestone 2, and that is stated wherever it appears.**
+
+Mapping each path onto the real hardware removes the need for it:
+
+- GPS: `HardwareSerial` owns the UART receive interrupt. See the next section.
+- Radio: RadioHead owns the DIO0 interrupt.
+- IMU: the firmware owns this interrupt, but the handler can only set a flag. Retrieving a sample needs a blocking I2C transaction, which must not run in interrupt context. The path is therefore `data_ready()` plus a main-context read, which needs a flag and not a queue.
+- Outbound packets: produced and consumed entirely in main context, and requires drop-oldest, which single-producer single-consumer ordering forbids.
+
+It is built and fully tested anyway, as a deliberate choice: a correct lock-free SPSC buffer is worth having in this repository on its own merits, and this repository is interview evidence.
+It is labelled as unused rather than quietly wired into a path that does not need it.
+If it is ever found on a data path without this note being removed, that is a bug.
+
+`packet_queue.hpp`, new, is what actually sits on the outbound path: a plain circular buffer, main-context only, dropping the oldest entry when full.
 
 ### The GPS path is not a ring buffer
 
