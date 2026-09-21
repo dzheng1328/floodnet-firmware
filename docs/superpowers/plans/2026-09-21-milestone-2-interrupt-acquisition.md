@@ -1019,9 +1019,24 @@ In `src/hal/teensy_gps.hpp`, replace `begin()` and the `RX_BUFFER_BYTES` constan
     /// were lost.
     static const int RX_BUFFER_BYTES = 4096;
 
-    HardwareSerial &port_;
+    HardwareSerialIMXRT &port_;
     uint8_t rx_storage_[RX_EXTRA_BYTES];
     uint16_t dropped_;
+```
+
+Also narrow the constructor to match:
+
+```cpp
+    /// HardwareSerialIMXRT rather than HardwareSerial: addMemoryForRead() is
+    /// declared on the concrete Teensy 4 subclass, not on the abstract base
+    /// (cores/teensy4/HardwareSerial.h, where the base closes at line 170 and
+    /// the subclass runs 172-356). Narrowing is honest here, since this driver
+    /// already targets one platform, and it beats a static_cast that would be
+    /// undefined behaviour for any other subclass. The seam is unaffected:
+    /// IGpsSource in lib/ stays platform-independent, and Serial1 is declared
+    /// `extern HardwareSerialIMXRT Serial1`, so the sole call site in
+    /// src/main.cpp needs no change.
+    explicit TeensyGps(HardwareSerialIMXRT &port) : port_(port), dropped_(0) {}
 ```
 
 `note_buffer_state()` needs no change: it already compares against `RX_BUFFER_BYTES`, which now reflects the deeper buffer.
