@@ -45,6 +45,8 @@ class FakeGps : public IGpsSource, public ISimTick {
 
     uint16_t rx_overflows() const override { return dropped_; }
 
+    bool pending() const override { return count_ > 0; }
+
   private:
     /// Matches the 64-byte software receive buffer Teensy 4.x HardwareSerial
     /// keeps, which is the buffer `TeensyGps` watches for overflow. At 9600
