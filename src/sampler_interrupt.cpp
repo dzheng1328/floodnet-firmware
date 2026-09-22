@@ -32,6 +32,11 @@ bool InterruptSampler::collect_imu() {
         return false;
     }
 
+    // Depends on the source clearing its ready flag before read() returns
+    // (TeensyImu clears it before the I2C transaction). A source that cleared
+    // it only after a successful read would, on a failed read, report ready
+    // forever and this loop would retry every pass.
+
     ImuSample sample;
     if (!imu_.read(&sample)) {
         return false;
@@ -101,14 +106,17 @@ bool InterruptSampler::service_radio() {
     if (encode_packet(packet, buffer, sizeof(buffer)) != PACKET_SIZE) {
         // Unreachable with a PACKET_SIZE buffer, but returning here without
         // the packet would leave a sequence gap no counter explains, which is
-        // exactly what this class promises not to do.
+        // exactly what this class promises not to do. push() appends at the
+        // tail, so the packet may go out after newer ones, out of order.
         tx_queue_.push(packet);
         return false;
     }
     if (!radio_.begin_transmit(buffer, PACKET_SIZE)) {
-        // The radio refused. Requeue rather than drop silently: either a later
-        // pass sends it, or the queue discards it as the stalest entry and
-        // counts it in tx_queue_drops(). Both keep the accounting closed.
+        // The radio refused. Requeue rather than drop silently. push() appends
+        // at the tail, so the packet becomes the newest entry: a later pass
+        // sends it behind everything queued since (out of sequence order), or
+        // drop-oldest eventually discards it and counts it in
+        // tx_queue_drops(). Both keep the accounting closed.
         tx_queue_.push(packet);
         return false;
     }

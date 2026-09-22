@@ -50,7 +50,7 @@ class TeensyImu : public IImuSource {
         return true;
     }
 
-    bool data_ready() const override { return s_sample_due; }
+    bool data_ready() const override { return ready_ && s_sample_due; }
 
     bool read(ImuSample *out) override {
         if (!ready_ || out == nullptr) {
