@@ -258,6 +258,7 @@ The GPS path is served by `HardwareSerial`'s own receive interrupt, filling a 40
 The radio is started and then left alone rather than waited on.
 `TeensyRadio::begin_transmit()` calls `RH_RF95::send()`, which loads the FIFO and returns; the DIO0 interrupt RadioHead attached during `init()` clears the driver's mode once the packet is on the air.
 `InterruptSampler::service_radio()` checks `tx_busy()` on a later pass instead of spinning inside `waitPacketSent()`, so a three-second SF12 transmission no longer stalls the loop.
+A transmission that never reports completion is abandoned after 5000 ms and counted in `tx_timeouts()`, so a lost DIO0 edge costs one packet rather than the node.
 
 The IMU is flagged by a 100 Hz Teensy `IntervalTimer` rather than by the sensor.
 `TeensyImu::begin()` arms the timer at the BNO055's fixed NDOF fusion rate; the handler sets a flag and returns, and `InterruptSampler::collect_imu()` performs the blocking I2C read only when `data_ready()` reports a sample.
@@ -296,7 +297,7 @@ It is recorded here as future work so that "did anything change after you saw th
 
 No board was available for this milestone.
 Every figure here is from the host simulation, and the firmware is compiled but never run on a Teensy in CI.
-The `IntervalTimer` IMU path in particular is exercised only against a fake.
+The `IntervalTimer` IMU path and `TeensyRadio::abort_transmit()`'s `setModeIdle()` recovery in particular are exercised only against fakes.
 
 ## Deferred to later milestones
 
@@ -309,11 +310,13 @@ The `IntervalTimer` IMU path in particular is exercised only against a fake.
 - **Sequence-gap counting.** Deferred to milestone 5.
   It is a receiver-side concern and belongs with the gateway/host tooling work planned there.
 - **Hardware watchdog.** The spec's error-handling section calls for a watchdog that resets a node that stops making progress; none exists yet.
-  A node whose radio wedges currently stays dead until power-cycled.
+  A node whose radio wedges persistently, failing every attempt rather than losing one completion, currently stays dead until power-cycled.
   In `node_polling`, `TeensyRadio::transmit()`'s 5000 ms `waitPacketSent()` timeout (see `src/hal/teensy_radio.hpp`) reduces that exposure but does not eliminate it, since nothing currently forces a reset if the node keeps retrying a dead radio indefinitely.
-  `node_interrupt` does not use that path and carries no timeout at all.
-  `TeensyRadio::tx_busy()` returns `driver_.mode() == RHModeTx`, which only RadioHead's DIO0 handler clears, so a single lost DIO0 edge leaves the node permanently mute while `tx_queue_drops` climbs.
-  Milestone 2 therefore increased this exposure; a deadline on `tx_busy()` is later work.
+  `node_interrupt` does not use that path.
+  `TeensyRadio::tx_busy()` returns `driver_.mode() == RHModeTx`, which only RadioHead's DIO0 handler clears, so without a deadline a single lost DIO0 edge would leave the node permanently mute.
+  `InterruptSampler` therefore abandons any transmission still in flight after `TX_TIMEOUT_MS` (5000 ms, the same bound), forces the radio idle through `IAsyncRadio::abort_transmit()`, and counts it in `tx_timeouts()`.
+  `test/test_interrupt/` drops one completion edge and asserts the node recovers and the sequence accounting stays closed.
+  What neither build does is reset a radio that wedges on every attempt; that is the watchdog's job.
 - **Host HAL trace replay.** The design spec calls for a host HAL implementation that replays recorded sensor traces from disk.
   What shipped instead is the header-only synthetic fakes under `test/support/`, which repeat one hardcoded NMEA sentence at a fixed byte rate.
   That substitution is a reasonable milestone-1 choice, sufficient for the timing-driven tests this milestone needs, but it is not what the spec describes.

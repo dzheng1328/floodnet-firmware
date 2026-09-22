@@ -155,6 +155,8 @@ The I2C read stays in main context, because a blocking I2C transaction inside an
 The improvement over milestone 1 is that the loop stops issuing a speculative I2C read on every pass and reads only when the sensor says a sample exists.
 
 `IAsyncRadio` is new, as described under Decisions taken.
+It also carries `abort_transmit()`, because the parent spec requires radio operations to carry timeouts and an asynchronous transmit has no call to hang one on.
+The sampler owns the deadline, on its own clock, so it is testable on the host: a transmission still in flight after 5000 ms, the same bound as the blocking path's `waitPacketSent()`, is abandoned and counted.
 
 ### Application
 
@@ -191,19 +193,20 @@ No finite depth can do better at SF12, where fixes arrive roughly forty times fa
 
 ## Drop accounting
 
-Two distinct counters, deliberately not merged:
+Three distinct counters, deliberately not merged:
 
 | Counter | Meaning | Expected in the interrupt build |
 |---|---|---|
 | `gps_rx_overflows` | Bytes lost before the parser saw them | Zero. This going to zero is the milestone's core result. |
 | `tx_queue_drops` | Complete packets the node chose not to send | Non-zero at SF12. This is the honest cost. |
+| `tx_timeouts` | Transmissions abandoned because the radio never reported completion | Zero unless a completion edge is lost. Non-zero means a radio fault, not load. |
 
 Collapsing these into one number would make the interrupt build look lossy at SF12 for a reason that has nothing to do with acquisition.
 Keeping them separate is what makes the result readable.
 
 An earlier draft of this table carried a third counter, `imu_ring_overflows`, for samples discarded because only the newest is used.
 It is gone because the IMU ring it counted is gone: the path is a flag set by an interrupt plus a read in main context, which needs no queue and therefore discards nothing.
-That leaves `tx_queue_drops` as the only new counter, and it stays out of band for this milestone.
+That leaves `tx_queue_drops` and `tx_timeouts` as the only new counters, and both stay out of band for this milestone.
 
 ## What this milestone claims
 

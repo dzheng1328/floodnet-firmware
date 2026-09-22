@@ -33,6 +33,12 @@ class InterruptSampler {
     /// the `wfi` instruction when no peripheral interrupt arrives first.
     static const uint32_t IDLE_CAP_MS = 1;
 
+    /// How long a transmission may stay in flight before it is abandoned.
+    /// Same bound as TeensyRadio::transmit()'s blocking wait, and for the same
+    /// reason: SF12 airtime for a 45-byte packet is about 3.0 s, so 5000 ms
+    /// leaves headroom without letting one lost completion edge mute the node.
+    static const uint32_t TX_TIMEOUT_MS = 5000;
+
     InterruptSampler(IGpsSource &gps, IImuSource &imu, IAsyncRadio &radio, IClock &clock,
                      uint16_t node_id, uint8_t ttl);
 
@@ -49,6 +55,18 @@ class InterruptSampler {
     uint16_t tx_queue_drops() const { return tx_queue_.drops(); }
 
     size_t tx_queue_high_water() const { return tx_queue_.high_water(); }
+
+    size_t tx_queue_size() const { return tx_queue_.size(); }
+
+    /// Transmissions abandoned after TX_TIMEOUT_MS without a completion.
+    /// Saturates at 0xFFFF, like tx_queue_drops(). The packet may in fact have
+    /// gone out; what is known is only that the radio never confirmed it, so
+    /// it is not counted in packets_sent().
+    uint16_t tx_timeouts() const { return tx_timeouts_; }
+
+    /// True between a successful begin_transmit() and the pass that observes
+    /// its completion or abandons it.
+    bool tx_in_flight() const { return tx_in_flight_; }
 
     /// The sequence number the next queued packet will carry. Assigned at
     /// queue time rather than send time, so a drop leaves a gap a receiver
@@ -75,6 +93,8 @@ class InterruptSampler {
     uint32_t seq_;
     uint32_t packets_sent_;
     bool tx_in_flight_;
+    uint32_t tx_started_ms_;
+    uint16_t tx_timeouts_;
     DiagCounters diag_;
 };
 

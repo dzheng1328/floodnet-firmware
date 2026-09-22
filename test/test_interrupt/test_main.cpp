@@ -150,6 +150,46 @@ void test_collects_gps_while_the_radio_is_transmitting(void) {
     TEST_ASSERT_EQUAL_UINT16(0, rig.sampler.diag().drops);
 }
 
+void test_a_lost_completion_edge_does_not_mute_the_node(void) {
+    // On hardware, tx_busy() clears only when RadioHead's DIO0 handler runs.
+    // Lose that one edge and, without a deadline, the node never transmits
+    // again while tx_queue_drops climbs forever. The parent spec requires
+    // radio operations to carry timeouts; this is the async path's.
+    Rig rig(kImuControlMs, kRadioControlMs, FakeGps::MAX_FIFO_DEPTH);
+    rig.radio.lose_next_completion();
+    rig.run_for(60000);
+
+    // Exactly one transmission was abandoned, and it was counted.
+    TEST_ASSERT_EQUAL_UINT16(1, rig.sampler.tx_timeouts());
+
+    // And the node kept sending afterwards. CONTROL sends ~859 packets in 60 s
+    // when nothing goes wrong; one 5 s stall costs at most a twelfth of that.
+    TEST_ASSERT_GREATER_THAN_UINT32(700, rig.sampler.packets_sent());
+}
+
+void test_accounting_stays_closed_across_a_timeout(void) {
+    // Every sequence number assigned is either sent, dropped from the queue,
+    // abandoned on timeout, or still waiting. A timeout that counted nothing
+    // would leave a gap no counter explains.
+    Rig rig(kImuReadMs, kRadioSf12Ms, FakeGps::MAX_FIFO_DEPTH);
+    rig.radio.lose_next_completion();
+    rig.run_for(60000);
+
+    const uint32_t accounted = rig.sampler.packets_sent() + rig.sampler.tx_queue_drops() +
+                               rig.sampler.tx_timeouts() + rig.sampler.tx_queue_size() +
+                               (rig.sampler.tx_in_flight() ? 1u : 0u);
+    TEST_ASSERT_EQUAL_UINT16(1, rig.sampler.tx_timeouts());
+    TEST_ASSERT_EQUAL_UINT32(rig.sampler.next_seq(), accounted);
+}
+
+void test_normal_sf12_airtime_is_not_mistaken_for_a_wedge(void) {
+    // 3023 ms of airtime must stay well inside the deadline.
+    Rig rig(kImuReadMs, kRadioSf12Ms, FakeGps::MAX_FIFO_DEPTH);
+    rig.run_for(60000);
+
+    TEST_ASSERT_EQUAL_UINT16(0, rig.sampler.tx_timeouts());
+}
+
 void test_no_transmission_without_a_complete_sentence(void) {
     SimClock clock;
     FakeGps gps("garbage without a dollar sign", kGpsByteRate,
@@ -178,6 +218,9 @@ int main(int, char **) {
     RUN_TEST(test_control_profile_loses_nothing_at_all);
     RUN_TEST(test_tx_queue_high_water_tracks_radio_pressure);
     RUN_TEST(test_collects_gps_while_the_radio_is_transmitting);
+    RUN_TEST(test_a_lost_completion_edge_does_not_mute_the_node);
+    RUN_TEST(test_accounting_stays_closed_across_a_timeout);
+    RUN_TEST(test_normal_sf12_airtime_is_not_mistaken_for_a_wedge);
     RUN_TEST(test_no_transmission_without_a_complete_sentence);
     return UNITY_END();
 }

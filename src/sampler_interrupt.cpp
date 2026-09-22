@@ -23,6 +23,8 @@ InterruptSampler::InterruptSampler(IGpsSource &gps, IImuSource &imu, IAsyncRadio
       seq_(0),
       packets_sent_(0),
       tx_in_flight_(false),
+      tx_started_ms_(0),
+      tx_timeouts_(0),
       diag_() {}
 
 bool InterruptSampler::collect_imu() {
@@ -93,6 +95,19 @@ bool InterruptSampler::service_radio() {
         return true;
     }
 
+    // Still busy past the deadline: the completion edge was lost or the modem
+    // wedged. Without this the node would stay mute for the rest of its life,
+    // because nothing else ever clears tx_busy(). Unsigned subtraction keeps
+    // this correct across a millis() wrap.
+    if (tx_in_flight_ && busy && clock_.now_ms() - tx_started_ms_ >= TX_TIMEOUT_MS) {
+        radio_.abort_transmit();
+        tx_in_flight_ = false;
+        if (tx_timeouts_ != 0xFFFF) {
+            ++tx_timeouts_;
+        }
+        return true;
+    }
+
     if (busy || tx_queue_.empty()) {
         return false;
     }
@@ -122,6 +137,7 @@ bool InterruptSampler::service_radio() {
     }
 
     tx_in_flight_ = true;
+    tx_started_ms_ = clock_.now_ms();
     return true;
 }
 

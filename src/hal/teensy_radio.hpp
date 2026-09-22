@@ -70,6 +70,15 @@ class TeensyRadio : public IAsyncRadio {
         return driver_.mode() == RHGenericDriver::RHModeTx;
     }
 
+    void abort_transmit() override {
+        if (!ready_) {
+            return;
+        }
+        // Forces the driver out of RHModeTx whether or not the modem finished,
+        // which is the state a lost DIO0 edge leaves behind.
+        driver_.setModeIdle();
+    }
+
     int receive(uint8_t *buf, size_t len) override {
         if (!ready_ || !driver_.available()) {
             return -1;

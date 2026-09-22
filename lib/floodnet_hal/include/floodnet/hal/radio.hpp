@@ -34,6 +34,11 @@ class IAsyncRadio : public IRadio {
     /// virtual, and wrapping that in a const method would require a cast that
     /// buys nothing.
     virtual bool tx_busy() = 0;
+
+    /// Abandons a transmission that never reported completion and returns
+    /// the radio to idle, so begin_transmit() can be used again. The caller
+    /// decides when a transmission has taken too long; the radio does not.
+    virtual void abort_transmit() = 0;
 };
 
 }  // namespace floodnet

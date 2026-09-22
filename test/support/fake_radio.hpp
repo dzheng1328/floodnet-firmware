@@ -18,7 +18,8 @@ class FakeRadio : public IAsyncRadio, public ISimTick {
           sent_count_(0),
           last_length_(0),
           busy_(false),
-          remaining_ms_(0) {
+          remaining_ms_(0),
+          lose_next_completion_(false) {
         memset(last_payload_, 0, sizeof(last_payload_));
     }
 
@@ -62,11 +63,26 @@ class FakeRadio : public IAsyncRadio, public ISimTick {
 
     bool tx_busy() override { return busy_; }
 
+    void abort_transmit() override {
+        busy_ = false;
+        remaining_ms_ = 0;
+    }
+
+    /// Simulates a lost DIO0 edge: the next transmission goes out, but the
+    /// radio never reports it finished, so tx_busy() stays true until
+    /// abort_transmit(). One-shot, so a sampler that recovers can be seen to.
+    void lose_next_completion() { lose_next_completion_ = true; }
+
     void on_tick(uint32_t elapsed_ms) override {
-        if (!busy_) {
+        if (!busy_ || remaining_ms_ == UINT32_MAX) {
             return;
         }
         if (elapsed_ms >= remaining_ms_) {
+            if (lose_next_completion_) {
+                lose_next_completion_ = false;
+                remaining_ms_ = UINT32_MAX;  // wedged: busy until aborted
+                return;
+            }
             remaining_ms_ = 0;
             busy_ = false;
             ++sent_count_;  // counted on completion, as the blocking path does
@@ -99,6 +115,7 @@ class FakeRadio : public IAsyncRadio, public ISimTick {
     uint8_t last_payload_[MAX_PAYLOAD];
     bool busy_;
     uint32_t remaining_ms_;
+    bool lose_next_completion_;
 };
 
 }  // namespace floodnet
