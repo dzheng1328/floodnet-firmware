@@ -41,7 +41,8 @@ class NmeaLineAssembler {
     /// Valid only after feed() returned true. NUL-terminated.
     const char *sentence() const { return line_; }
 
-    /// Length of the sentence, excluding the terminator and the NUL.
+    /// Length of the sentence, excluding the terminator and the NUL. Valid
+    /// only after feed() returned true; stale after a feed() that returns false.
     size_t length() const { return complete_len_; }
 
   private:

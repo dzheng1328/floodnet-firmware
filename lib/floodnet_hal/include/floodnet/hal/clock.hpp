@@ -16,7 +16,7 @@ class IClock {
     /// do, so a caller re-checks its sources on return rather than assuming
     /// work is waiting.
     ///
-    /// This is not a simulation convenience. On Teensy it is __WFI(): stop the
+    /// This is not a simulation convenience. On Teensy it is the `wfi` instruction: stop the
     /// core until an interrupt wakes it. It is also the primitive the duty
     /// cycling planned for milestone 3 will build on.
     virtual void wait_for_event(uint32_t max_ms) = 0;

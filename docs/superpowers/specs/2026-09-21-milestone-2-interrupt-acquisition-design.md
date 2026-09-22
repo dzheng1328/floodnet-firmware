@@ -19,8 +19,8 @@ Two of the three peripherals are already interrupt-served in milestone 1, as the
 
 What milestone 2 actually does:
 
-1. Replaces the blocking drain with per-stream SPSC ring buffers and a non-blocking loop.
-2. Adds the one genuinely missing interrupt path, on the BNO055 data-ready line.
+1. Replaces the blocking drain with a non-blocking loop that drains the existing `HardwareSerial` buffer on every pass; no ring buffer of ours sits on any data path (see "The GPS path is not a ring buffer").
+2. Adds the one genuinely missing interrupt path for the IMU, driven by a 100 Hz Teensy `IntervalTimer` because the BNO055 has no data-ready interrupt (see "Corrections to the parent spec").
 3. Makes radio transmission asynchronous so the loop stops spinning on a completion an ISR has already recorded.
 4. Replaces silent, byte-level loss with explicit, counted, policy-chosen packet drops.
 
@@ -36,6 +36,13 @@ It requires the producer to advance the consumer's index, which is exactly what 
 
 The buffer drops the **newest** element when full and increments a counter.
 The parent spec's stated reason for not blocking the producer still holds; only the choice of which element to discard changes.
+
+**BNO055 data-ready interrupt.**
+The parent spec's hardware table originally said the BNO055 has a "data-ready interrupt on GPIO", and an earlier draft of this document planned the IMU path around it.
+That is wrong: the BNO055's INT pin offers motion-triggered sources only (any-motion, slow/no-motion and high-g on the accelerometer, any-motion and high-rate on the gyroscope), and none of them signals that a fused sample is ready.
+The IMU path instead uses a Teensy `IntervalTimer` at 100 Hz, the sensor's fixed NDOF fusion output rate, whose handler sets a flag and returns.
+The INT pin is left unconnected.
+See `docs/hardware.md`, "IMU sample timing".
 
 **Counters in the packet stream.**
 The parent spec states that overflow, CRC, and sequence-gap counters "are part of the packet stream rather than debug-only output".
@@ -140,10 +147,10 @@ It reimplements a core peripheral driver, gains nothing measurable over the fram
 
 `IClock` gains `wait_for_event(uint32_t max_ms)`.
 This is not a simulation artifact.
-On Teensy it is `__WFI()`, sleep until an interrupt arrives or the cap expires, and it is also the primitive milestone 3's duty cycling will build on.
+On Teensy it is the `wfi` instruction, sleep until an interrupt arrives or the cap expires, and it is also the primitive milestone 3's duty cycling will build on.
 
 `IImuSource` gains `bool data_ready()`.
-The interrupt service routine on the BNO055 INT pin sets a flag and nothing more.
+The interrupt service routine of a 100 Hz `IntervalTimer`, not the BNO055's INT pin (see "Corrections to the parent spec"), sets a flag and nothing more.
 The I2C read stays in main context, because a blocking I2C transaction inside an interrupt handler is the wrong answer regardless of what it would do to the benchmark.
 The improvement over milestone 1 is that the loop stops issuing a speculative I2C read on every pass and reads only when the sensor says a sample exists.
 
@@ -152,7 +159,7 @@ The improvement over milestone 1 is that the loop stops issuing a speculative I2
 ### Application
 
 `src/sampler_interrupt.{hpp,cpp}`, new.
-`step()` drains the GPS ring buffer, parses completed sentences, reads the IMU when `data_ready()` reports a sample, starts a transmit when the radio is idle, and calls `wait_for_event()` when there is no work.
+`step()` drains the `HardwareSerial` receive buffer, parses completed sentences, reads the IMU when `data_ready()` reports a sample, starts a transmit when the radio is idle, and calls `wait_for_event()` when there is no work.
 It never blocks.
 
 `src/main.cpp` selects a sampler on the `FLOODNET_SAMPLER_POLLING` and `FLOODNET_SAMPLER_INTERRUPT` build flags.
@@ -172,8 +179,8 @@ A flag set in interrupt context and read in main context is one `volatile bool`,
 
 Outbound packet queue: 8 packets, and it drops the **oldest**.
 
-This is the opposite policy from the two ring buffers above, and the difference is not arbitrary.
-The GPS and IMU rings are fed by interrupt handlers, so they are SPSC and the producer cannot touch the consumer's index, which forces drop-newest.
+This is the opposite policy from `RingBuffer`'s, and the difference is not arbitrary.
+`RingBuffer` sits on no data path in this milestone, but it is designed to be fed by an interrupt handler, so it is SPSC and the producer cannot touch the consumer's index, which forces drop-newest.
 The outbound queue is produced and consumed entirely in main context, so it is under no such constraint and can drop whichever end is less useful.
 
 For position fixes the older packet is the less useful one: a receiver would rather have the node's current position than its position three seconds ago.
@@ -184,7 +191,7 @@ No finite depth can do better at SF12, where fixes arrive roughly forty times fa
 
 ## Drop accounting
 
-Three distinct counters, deliberately not merged:
+Two distinct counters, deliberately not merged:
 
 | Counter | Meaning | Expected in the interrupt build |
 |---|---|---|
@@ -272,7 +279,7 @@ All 46 existing tests stay green, and the benchmark must reproduce the published
 Deferred to later milestones as already recorded in the README, and not reopened here: mesh relay wiring, node state machine and sleep, sequence-gap counting, hardware watchdog, and host trace replay.
 
 Hardware validation is out of scope for this milestone.
-No board is available, so the IMU data-ready interrupt is written and compiled but exercised only against a fake.
+No board is available, so the IMU `IntervalTimer` path is written and compiled but exercised only against a fake.
 The README must say so plainly rather than let the reader assume otherwise.
 
 ## Open questions

@@ -37,7 +37,7 @@ The exact parts are listed so that pin assignments, bus choices, and timing budg
 |---|---|---|
 | MCU | Teensy 4.1 | - |
 | GPS | u-blox NEO-M8N | UART, NMEA 0183, 9600 baud default |
-| IMU | Bosch BNO055 | I2C at 400 kHz, data-ready interrupt on GPIO |
+| IMU | Bosch BNO055 | I2C at 400 kHz; sampled on a 100 Hz timer (this originally said "data-ready interrupt on GPIO", which the BNO055 does not have; see the milestone 2 design doc, "Corrections to the parent spec") |
 | Radio | HopeRF RFM95W (SX1276) | SPI, 915 MHz ISM band, DIO0 interrupt |
 
 ## Architecture
@@ -74,7 +74,9 @@ Interfaces cover GPS, IMU, radio, clock, and power.
 Two strategies exist:
 
 - `sampler_polling.cpp` blocks on each sensor in turn inside a superloop.
-- `sampler_interrupt.cpp` fills ring buffers from UART receive, IMU data-ready, and radio DIO0 interrupt handlers, leaving the main loop to drain them.
+- `sampler_interrupt.cpp` runs a non-blocking loop that drains `HardwareSerial`'s interrupt-filled GPS buffer, reads the IMU when a 100 Hz timer flags a sample, and polls the radio's DIO0-cleared busy state.
+  This originally said it fills ring buffers from UART receive, IMU data-ready, and radio DIO0 interrupt handlers; none of those paths turned out to need a ring buffer of ours, and the BNO055 has no data-ready interrupt.
+  See the milestone 2 design doc.
 
 Both feed the same core and emit identical packets.
 The only difference is how bytes reach the buffers.
@@ -159,7 +161,9 @@ Each milestone is a self-contained increment leaving the repository in a working
    Complete and functional, with the data loss characteristic latent rather than disguised.
 
 2. **Interrupt-driven acquisition.** Designed in `2026-09-21-milestone-2-interrupt-acquisition-design.md`.
-   Per-stream SPSC ring buffers, a non-blocking drain that replaces the blocking waits on the already-ISR-served GPS and radio paths, a new interrupt path for the IMU data-ready line, the second build environment, drop counters surfaced in the packet stream.
+   A non-blocking drain that replaces the blocking waits on the already-ISR-served GPS and radio paths, a timer-driven interrupt path for the IMU, a drop-oldest outbound queue with an out-of-band `tx_queue_drops` counter, and the second build environment.
+   This originally listed per-stream SPSC ring buffers, an IMU data-ready interrupt, and drop counters surfaced in the packet stream; no data path needed a ring buffer, the BNO055 has no data-ready interrupt, and the new counter stays out of band.
+   See the milestone 2 design doc.
 
 3. **Power management.**
    Sleep modes and duty cycling driven by the node state machine.

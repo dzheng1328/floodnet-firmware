@@ -34,7 +34,7 @@ CI enforces it directly: a step in `.github/workflows/ci.yml` greps `lib/` for `
 ## Building
 
 ```bash
-pio run -e node_polling     # sensor node, milestone 1 polling loop
+pio run -e node_polling     # sensor node, blocking polling loop
 pio run -e node_interrupt   # sensor node, milestone 2 non-blocking loop
 pio run -e gateway          # gateway
 pio test -e native          # unit tests, no hardware needed
@@ -45,7 +45,7 @@ pio test -e native          # unit tests, no hardware needed
 45 bytes, little-endian, CRC16-CCITT-FALSE over the first 43.
 Carries a node identifier, a sequence number, a TTL, a GPS fix, an IMU sample, and the node's drop counter.
 That counter travels in-band deliberately: a receiver can see loss at the source rather than inferring it from gaps.
-A second counter reserved for CRC errors travels alongside it but is always zero in milestone 1, since a node only transmits and never decodes a CRC of its own; see the byte table below.
+A second counter reserved for CRC errors travels alongside it but is always zero in both milestones, since a node only transmits and never decodes a CRC of its own; see the byte table below.
 
 The byte layout below is read directly from `encode_packet()` in `lib/floodnet_core/src/packet.cpp`, which is the only authoritative description of it.
 `test/test_packet/test_main.cpp` has a golden-vector test, `test_golden_vector_pins_byte_layout`, that encodes a fully specified packet and asserts the exact 45 bytes.
@@ -71,7 +71,7 @@ If that test ever fails, this table is wrong and needs to be regenerated from th
 | 36 | 2 | imu.roll_cd | int16, centidegrees |
 | 38 | 1 | imu.valid | 0 or 1 |
 | 39 | 2 | diag.drops | uint16 |
-| 41 | 2 | diag.crc_errors | uint16, reserved, always 0 in milestone 1 |
+| 41 | 2 | diag.crc_errors | uint16, reserved, always 0 in both milestones |
 | 43 | 2 | crc16 | uint16, CRC16-CCITT-FALSE over bytes 0-42 |
 
 ## Gateway serial output
@@ -87,7 +87,7 @@ REC,node_id,seq,gps_time_ms,lat_1e7,lon_1e7,alt_mm,satellites,yaw_cd,pitch_cd,ro
 
 `gps_valid` and `imu_valid` are appended at the end rather than inserted among the existing fields, so the field order a consumer already depends on stays stable.
 Each is `1` or `0`.
-`crc_errors` is always `0` here in milestone 1, for the same reason it is reserved in the wire format: a node only transmits and never decodes a CRC of its own.
+`crc_errors` is always `0` here in both milestones, for the same reason it is reserved in the wire format: a node only transmits and never decodes a CRC of its own.
 `imu_valid` is `0` when `SamplePairer::pair` could not find an IMU sample within the pairing skew budget; without this flag, an unpaired record's `yaw_cd,pitch_cd,roll_cd` of `0,0,0` is indistinguishable from a genuinely level node.
 
 A packet that fails to decode produces:
@@ -113,7 +113,7 @@ The authoritative source for this format is `print_record()` and `loop()` in `sr
 
 ### Radio timing profiles
 
-`test/test_polling/` and `test/test_benchmark/` run the same sampler code against three simulated radio timing profiles, named for what they are:
+`test/test_polling/`, `test/test_interrupt/` and `test/test_benchmark/` run both samplers against the same three simulated radio timing profiles, named for what they are:
 
 | Profile | IMU read | Radio transmit | What it represents |
 |---|---|---|---|
@@ -176,6 +176,20 @@ BENCH,interrupt,4096,SF12,60000,19,0,831,0.32,0.00,8
 | interrupt | 64/4096 | SF7 | 9.07 | 0.00 | 306 |
 | interrupt | 64/4096 | SF12 | 0.32 | 0.00 | 831 |
 
+The `tx drops` column is structurally zero for every polling row, not measured as zero: `PollingSampler` has no outbound queue, so there is nothing for it to count.
+That sampler does lose fixes, though.
+`PollingSampler::collect_gps_bytes()` drains the whole receive buffer, parses every complete sentence, and keeps only the last one; every earlier fix in that drain is discarded and counted nowhere.
+With a 64-byte buffer barely one sentence survives a stall, so this was invisible in milestone 1; with 4096 bytes it dominates.
+The figures below are derived from the published rows, not measured by any counter.
+Sentences reaching the parser = sim_duration_ms x 0.96 B/ms / 68 bytes per sentence, which holds because `gps_rx_overflows = 0` means every byte reached the parser.
+
+| Row | Sentences parsed (derived) | Packets sent | Fixes lost |
+|---|---|---|---|
+| `polling,4096,SF7` | ~847 | 588 | ~259, uncounted |
+| `interrupt,4096,SF7` | ~847 | 544 | 306, counted |
+| `polling,4096,SF12` | ~857 | 20 | ~837, uncounted |
+| `interrupt,4096,SF12` | ~847 | 19 | 831, counted |
+
 Three things to read out of it:
 
 1. **Either change alone eliminates GPS byte loss. They are redundant for that purpose.**
@@ -183,6 +197,8 @@ Three things to read out of it:
    The buffer was sized at 4096 bytes to cover 3023 ms x 0.96 B/ms = 2902 bytes of SF12 airtime, and it turns out that alone is sufficient without a non-blocking loop.
    "Interrupt-driven acquisition eliminated the data loss" is not a claim this data supports.
    A bigger `HardwareSerial` buffer would have done it.
+   But the two are not equivalent in the way the zeros suggest: polling at 4096 swaps byte-level loss for an equally large fix-level loss that no counter reports.
+   At SF12 it silently discards about 837 fixes, against the interrupt build's 831 counted drops.
 
 2. **At SF7 the deeper buffer alone is the fastest configuration measured, and faster than the interrupt build.**
    Polling at 4096 reaches 9.79 packets/sec against the interrupt build's 9.07 at either depth, from a 5.99 baseline.
@@ -192,9 +208,11 @@ Three things to read out of it:
 
 **What the non-blocking loop actually buys**, none of which is throughput:
 
-- At SF12, 831 counted packet drops replace 56948 silent byte-level overflows.
+- At SF12, the interrupt build's 831 counted packet drops stand against about 837 fixes that `polling,4096` discards with no counter at all (derived above).
+  Milestone 1's `polling,64` configuration lost 56948 bytes to overflow at SF12; those were counted, in every packet's `drops` field, but as bytes rather than as fixes.
   The loss is the same physics; what changes is that it is explicit, chosen by a stated policy, and attributable.
 - Sequence numbers are assigned when a fix is queued rather than when it is sent, so a receiver sees a gap and can count what the node discarded.
+  One caveat: a packet the radio refuses is re-queued at the tail, so it goes out behind newer packets and a receiver must tolerate out-of-order sequence numbers rather than read every inversion as loss.
 - The outbound queue keeps the freshest fix rather than the oldest, which matters for position data.
 - The loop is free to do other work.
   Milestones 3 through 5 need relay, duty cycling and sleep, and a superloop that blocks for three seconds on a transmit structurally cannot host them.
@@ -214,10 +232,10 @@ That fixture keeps the 64-byte depth so the `polling,64` benchmark row remains c
 **`node_polling` as built today does not reproduce this.**
 `TeensyGps::begin()` in `src/hal/teensy_gps.hpp` calls `addMemoryForRead()` unconditionally, and `src/main.cpp` constructs the single `TeensyGps` instance outside the `FLOODNET_SAMPLER_INTERRUPT`/`FLOODNET_SAMPLER_POLLING` branch, so both build targets supply the same 4096-byte buffer.
 The two shipped firmware images therefore differ only in acquisition strategy (blocking vs. non-blocking), not in GPS buffer depth.
-The milestone 1 configuration, polling with a 64-byte buffer, exists only as the `polling,64` row in the host simulation below, not as anything you can flash.
+The milestone 1 configuration, polling with a 64-byte buffer, exists only as the `polling,64` row in the host simulation in [Results](#results), not as anything you can flash.
 Someone who flashes `node_polling` expecting milestone 1's loss behaviour will not see it; they will see the `polling,4096` row instead.
 
-That counter's unit is implementation-defined, and the two implementations in this repository do not measure the same thing.
+The `drops` counter's unit is implementation-defined, and the two implementations in this repository do not measure the same thing.
 The simulated GPS source in `test/support/fake_gps.hpp` counts one overflow per individual byte it discards, because it knows exactly what it threw away.
 The Teensy driver in `src/hal/teensy_gps.hpp` counts one overflow per loop pass that finds the UART buffer already saturated, because real hardware exposes no lost-byte count.
 Do not compare a drop count from the simulation against a drop count from hardware; they are different quantities that happen to share a name.
@@ -292,7 +310,10 @@ The `IntervalTimer` IMU path in particular is exercised only against a fake.
   It is a receiver-side concern and belongs with the gateway/host tooling work planned there.
 - **Hardware watchdog.** The spec's error-handling section calls for a watchdog that resets a node that stops making progress; none exists yet.
   A node whose radio wedges currently stays dead until power-cycled.
-  `TeensyRadio::transmit()`'s 5000 ms `waitPacketSent()` timeout (see Radio timing profiles and `src/hal/teensy_radio.hpp`) reduces that exposure but does not eliminate it, since nothing currently forces a reset if the node keeps retrying a dead radio indefinitely.
+  In `node_polling`, `TeensyRadio::transmit()`'s 5000 ms `waitPacketSent()` timeout (see `src/hal/teensy_radio.hpp`) reduces that exposure but does not eliminate it, since nothing currently forces a reset if the node keeps retrying a dead radio indefinitely.
+  `node_interrupt` does not use that path and carries no timeout at all.
+  `TeensyRadio::tx_busy()` returns `driver_.mode() == RHModeTx`, which only RadioHead's DIO0 handler clears, so a single lost DIO0 edge leaves the node permanently mute while `tx_queue_drops` climbs.
+  Milestone 2 therefore increased this exposure; a deadline on `tx_busy()` is later work.
 - **Host HAL trace replay.** The design spec calls for a host HAL implementation that replays recorded sensor traces from disk.
   What shipped instead is the header-only synthetic fakes under `test/support/`, which repeat one hardcoded NMEA sentence at a fixed byte rate.
   That substitution is a reasonable milestone-1 choice, sufficient for the timing-driven tests this milestone needs, but it is not what the spec describes.

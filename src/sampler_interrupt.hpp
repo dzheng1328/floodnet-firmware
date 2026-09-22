@@ -30,7 +30,7 @@ class InterruptSampler {
     static const size_t TX_QUEUE_DEPTH = 8;
 
     /// Cap on a single idle, matching the Teensy systick period that wakes
-    /// __WFI() when no peripheral interrupt arrives first.
+    /// the `wfi` instruction when no peripheral interrupt arrives first.
     static const uint32_t IDLE_CAP_MS = 1;
 
     InterruptSampler(IGpsSource &gps, IImuSource &imu, IAsyncRadio &radio, IClock &clock,
