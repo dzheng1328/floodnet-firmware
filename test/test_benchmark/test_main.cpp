@@ -75,7 +75,10 @@ static BenchResult run_polling(const char *profile, size_t buffer_bytes, uint32_
     BenchResult result;
     result.packets = sampler.packets_sent();
     result.overflows = sampler.diag().drops;
-    result.tx_drops = 0;  // the polling sampler has no outbound queue
+    // Not measurable on this path, rather than measured as zero: the polling
+    // sampler has no outbound queue, and it discards all but the last fix of
+    // each drain without counting them. See README.md, "The 2x2".
+    result.tx_drops = 0;
     report("polling", buffer_bytes, profile, clock.now_ms(), &result, 0);
     return result;
 }
@@ -135,9 +138,10 @@ void test_deep_buffer_alone_eliminates_gps_byte_loss(void) {
     // than left out.
     //
     // All three profiles run so the matrix is complete: without the SF7 row in
-    // particular, the improvement from 5.99 to 9.07 packets/sec could not be
+    // particular, the move from the 5.99 packets/sec baseline could not be
     // attributed between the deeper buffer and the non-blocking loop, which is
-    // the entire reason this benchmark is a 2x2.
+    // the entire reason this benchmark is a 2x2. That row measures 9.79, above
+    // the interrupt build's 9.07: at SF7 the deeper buffer alone is faster.
     BenchResult control = run_polling("CONTROL", kDeepBuffer, kImuControlMs, kRadioControlMs);
     BenchResult sf7 = run_polling("SF7", kDeepBuffer, kImuReadMs, kRadioSf7Ms);
     BenchResult sf12 = run_polling("SF12", kDeepBuffer, kImuReadMs, kRadioSf12Ms);
@@ -147,13 +151,17 @@ void test_deep_buffer_alone_eliminates_gps_byte_loss(void) {
     TEST_ASSERT_EQUAL_UINT16(0, sf12.overflows);
 }
 
-void test_non_blocking_alone_helps_but_the_shallow_buffer_still_bites(void) {
-    run_interrupt("CONTROL", kShallowBuffer, kImuControlMs, kRadioControlMs);
-    run_interrupt("SF7", kShallowBuffer, kImuReadMs, kRadioSf7Ms);
-    run_interrupt("SF12", kShallowBuffer, kImuReadMs, kRadioSf12Ms);
-    // Reported for attribution, not asserted: what this row buys depends on
-    // the interaction of drain rate and buffer depth, and pinning an exact
-    // outcome here would be pinning the timing model rather than a behaviour.
+void test_non_blocking_loop_alone_also_eliminates_byte_loss(void) {
+    BenchResult control = run_interrupt("CONTROL", kShallowBuffer, kImuControlMs, kRadioControlMs);
+    BenchResult sf7 = run_interrupt("SF7", kShallowBuffer, kImuReadMs, kRadioSf7Ms);
+    BenchResult sf12 = run_interrupt("SF12", kShallowBuffer, kImuReadMs, kRadioSf12Ms);
+
+    // This row was expected to overflow the 64-byte buffer and does not: a
+    // loop that drains on every pass keeps up even at the shallow depth. The
+    // test is named for that result, so it asserts it.
+    TEST_ASSERT_EQUAL_UINT16(0, control.overflows);
+    TEST_ASSERT_EQUAL_UINT16(0, sf7.overflows);
+    TEST_ASSERT_EQUAL_UINT16(0, sf12.overflows);
 }
 
 void test_milestone_two_configuration_loses_no_gps_bytes(void) {
@@ -184,10 +192,13 @@ void test_control_profile_is_a_null_control(void) {
     TEST_ASSERT_TRUE(interrupted.packets_per_sec < polled.packets_per_sec * 1.10);
 }
 
-void test_sf7_throughput_improves_where_there_is_headroom(void) {
-    // SF7 is the one profile with real headroom: 92 ms of airtime against a
-    // baseline that measured well under the ceiling. This is the milestone's
-    // only legitimate throughput claim.
+void test_non_blocking_loop_beats_the_milestone_one_baseline_at_sf7(void) {
+    // A regression guard, not a throughput claim. It compares against the
+    // milestone 1 baseline (polling, 64-byte buffer, 5.99 packets/sec), so it
+    // changes two variables at once and cannot attribute the gain. The
+    // single-variable comparison goes the other way: polling with the 4096-byte
+    // buffer measures 9.79 at SF7, above this build's 9.07. See README.md,
+    // "Why the interrupt build is slower at SF7".
     BenchResult polled = run_polling("SF7", kShallowBuffer, kImuReadMs, kRadioSf7Ms);
     BenchResult interrupted = run_interrupt("SF7", kDeepBuffer, kImuReadMs, kRadioSf7Ms);
 
@@ -198,9 +209,9 @@ int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_baseline_row_still_reproduces_milestone_one);
     RUN_TEST(test_deep_buffer_alone_eliminates_gps_byte_loss);
-    RUN_TEST(test_non_blocking_alone_helps_but_the_shallow_buffer_still_bites);
+    RUN_TEST(test_non_blocking_loop_alone_also_eliminates_byte_loss);
     RUN_TEST(test_milestone_two_configuration_loses_no_gps_bytes);
     RUN_TEST(test_control_profile_is_a_null_control);
-    RUN_TEST(test_sf7_throughput_improves_where_there_is_headroom);
+    RUN_TEST(test_non_blocking_loop_beats_the_milestone_one_baseline_at_sf7);
     return UNITY_END();
 }

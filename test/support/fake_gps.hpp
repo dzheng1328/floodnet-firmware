@@ -1,7 +1,8 @@
 #ifndef FLOODNET_TEST_FAKE_GPS_HPP
 #define FLOODNET_TEST_FAKE_GPS_HPP
 
-#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <floodnet/hal/gps.hpp>
@@ -36,8 +37,12 @@ class FakeGps : public IGpsSource, public ISimTick {
           tail_(0),
           count_(0),
           dropped_(0) {
-        assert(fifo_depth > 0 && fifo_depth <= MAX_FIFO_DEPTH &&
-               "FakeGps depth must be between 1 and MAX_FIFO_DEPTH");
+        // Not assert(): this guards the fifo_ indexing below, and a guard
+        // that NDEBUG can strip would turn a bad depth into memory corruption.
+        if (fifo_depth == 0 || fifo_depth > MAX_FIFO_DEPTH) {
+            fprintf(stderr, "FakeGps depth must be between 1 and MAX_FIFO_DEPTH\n");
+            abort();
+        }
     }
 
     void on_tick(uint32_t elapsed_ms) override {

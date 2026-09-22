@@ -114,6 +114,19 @@ void test_control_profile_loses_nothing_at_all(void) {
     TEST_ASSERT_EQUAL_UINT16(0, rig.sampler.tx_queue_drops());
 }
 
+void test_tx_queue_high_water_tracks_radio_pressure(void) {
+    // tx_queue_high_water is a published column in every BENCH row, so pin it.
+    // At SF12 the radio cannot keep up and the queue fills to capacity; at
+    // CONTROL each packet is sent before the next fix arrives.
+    Rig sf12(kImuReadMs, kRadioSf12Ms, FakeGps::MAX_FIFO_DEPTH);
+    sf12.run_for(60000);
+    TEST_ASSERT_EQUAL_size_t(8, sf12.sampler.tx_queue_high_water());
+
+    Rig control(kImuControlMs, kRadioControlMs, FakeGps::MAX_FIFO_DEPTH);
+    control.run_for(60000);
+    TEST_ASSERT_EQUAL_size_t(1, control.sampler.tx_queue_high_water());
+}
+
 void test_collects_gps_while_the_radio_is_transmitting(void) {
     // The defect milestone 1 had, stated directly: during a 3-second SF12
     // transmit the loop must still be draining the receive buffer.
@@ -163,6 +176,7 @@ int main(int, char **) {
     RUN_TEST(test_sf12_drops_whole_packets_instead);
     RUN_TEST(test_dropped_packets_leave_visible_sequence_gaps);
     RUN_TEST(test_control_profile_loses_nothing_at_all);
+    RUN_TEST(test_tx_queue_high_water_tracks_radio_pressure);
     RUN_TEST(test_collects_gps_while_the_radio_is_transmitting);
     RUN_TEST(test_no_transmission_without_a_complete_sentence);
     return UNITY_END();

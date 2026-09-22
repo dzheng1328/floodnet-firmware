@@ -1,9 +1,10 @@
 #ifndef FLOODNET_TEST_SIM_CLOCK_HPP
 #define FLOODNET_TEST_SIM_CLOCK_HPP
 
-#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include <floodnet/hal/clock.hpp>
 
@@ -29,8 +30,13 @@ class SimClock : public IClock {
 
     void add_observer(ISimTick *observer) {
         // Silently dropping an observer would make a future test fail with no
-        // indication why its fake stopped receiving ticks. Fail loudly instead.
-        assert(observer_count_ < MAX_OBSERVERS && "SimClock observer capacity exceeded");
+        // indication why its fake stopped receiving ticks. Fail loudly instead,
+        // and not with assert(): NDEBUG would strip it and leave the write
+        // below running off the end of observers_.
+        if (observer_count_ >= MAX_OBSERVERS) {
+            fprintf(stderr, "SimClock observer capacity exceeded\n");
+            abort();
+        }
         observers_[observer_count_++] = observer;
     }
 

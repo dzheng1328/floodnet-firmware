@@ -31,7 +31,7 @@ class FakeRadio : public IAsyncRadio, public ISimTick {
         //
         // Refusing rather than asserting, and rather than proceeding: every
         // caller already branches on this return (see
-        // src/sampler_polling.cpp:91), so a refusal shows up as an
+        // PollingSampler::step() in src/sampler_polling.cpp), so a refusal shows up as an
         // uncounted packet rather than a corrupted measurement. It also
         // matches begin_transmit(), which refuses-when-busy the same way.
         if (busy_) {

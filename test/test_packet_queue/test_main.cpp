@@ -113,6 +113,67 @@ void test_drop_counter_saturates_instead_of_wrapping(void) {
     TEST_ASSERT_EQUAL_UINT16(0xFFFF, queue.drops());
 }
 
+void test_non_power_of_two_capacity_wraps_correctly(void) {
+    // The class documents modulo index arithmetic. A capacity of 3 fails if
+    // that is ever "optimised" to a bitmask, which only works for powers of two.
+    PacketQueue<3> queue;
+    Packet out;
+
+    for (uint32_t i = 0; i < 3; ++i) {
+        queue.push(packet_with_seq(i));
+    }
+    queue.push(packet_with_seq(3));
+    TEST_ASSERT_EQUAL_UINT16(1, queue.drops());
+    TEST_ASSERT_EQUAL_size_t(3, queue.size());
+
+    // Drop-oldest discarded seq 0; the rest come out in order.
+    for (uint32_t expected = 1; expected <= 3; ++expected) {
+        TEST_ASSERT_TRUE(queue.pop(&out));
+        TEST_ASSERT_EQUAL_UINT32(expected, out.seq);
+    }
+    TEST_ASSERT_FALSE(queue.pop(&out));
+
+    // With two entries standing, push one and pop one many times, so the head
+    // and tail indices cross the capacity boundary at every offset.
+    queue.push(packet_with_seq(100));
+    queue.push(packet_with_seq(101));
+    for (uint32_t i = 102; i < 1102; ++i) {
+        queue.push(packet_with_seq(i));
+        TEST_ASSERT_TRUE(queue.pop(&out));
+        TEST_ASSERT_EQUAL_UINT32(i - 2, out.seq);
+    }
+    TEST_ASSERT_EQUAL_UINT16(1, queue.drops());
+
+    // Overflow again at an offset that is not zero.
+    queue.push(packet_with_seq(2000));
+    queue.push(packet_with_seq(2001));
+    TEST_ASSERT_EQUAL_UINT16(2, queue.drops());
+    const uint32_t expected[] = {1101, 2000, 2001};
+    for (size_t i = 0; i < 3; ++i) {
+        TEST_ASSERT_TRUE(queue.pop(&out));
+        TEST_ASSERT_EQUAL_UINT32(expected[i], out.seq);
+    }
+    TEST_ASSERT_TRUE(queue.empty());
+}
+
+void test_capacity_of_one_keeps_only_the_newest(void) {
+    PacketQueue<1> queue;
+    Packet out;
+
+    queue.push(packet_with_seq(1));
+    TEST_ASSERT_TRUE(queue.pop(&out));
+    TEST_ASSERT_EQUAL_UINT32(1, out.seq);
+    TEST_ASSERT_TRUE(queue.empty());
+
+    queue.push(packet_with_seq(2));
+    queue.push(packet_with_seq(3));
+    TEST_ASSERT_EQUAL_UINT16(1, queue.drops());
+    TEST_ASSERT_EQUAL_size_t(1, queue.size());
+    TEST_ASSERT_TRUE(queue.pop(&out));
+    TEST_ASSERT_EQUAL_UINT32(3, out.seq);
+    TEST_ASSERT_FALSE(queue.pop(&out));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_push_then_pop_returns_the_packet);
@@ -122,5 +183,7 @@ int main(int, char **) {
     RUN_TEST(test_indices_survive_wrapping_many_times);
     RUN_TEST(test_high_water_records_the_deepest_occupancy);
     RUN_TEST(test_drop_counter_saturates_instead_of_wrapping);
+    RUN_TEST(test_non_power_of_two_capacity_wraps_correctly);
+    RUN_TEST(test_capacity_of_one_keeps_only_the_newest);
     return UNITY_END();
 }
