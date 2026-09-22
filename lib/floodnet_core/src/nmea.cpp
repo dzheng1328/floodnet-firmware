@@ -158,4 +158,29 @@ bool parse_gga(const char *sentence, size_t len, uint32_t time_ms, GpsFix *out) 
     return true;
 }
 
+bool NmeaLineAssembler::feed(char c) {
+    if (c == '$') {
+        len_ = 0;
+    }
+
+    if (c == '\r' || c == '\n') {
+        if (len_ == 0) {
+            return false;  // bare terminator, nothing to deliver
+        }
+        line_[len_] = '\0';
+        complete_len_ = len_;
+        len_ = 0;
+        return true;
+    }
+
+    if (len_ < NMEA_MAX_SENTENCE) {
+        line_[len_++] = c;
+    } else {
+        // Overlong. Discard and resynchronise on the next '$' rather than
+        // delivering a truncated line that can only fail its checksum.
+        len_ = 0;
+    }
+    return false;
+}
+
 }  // namespace floodnet

@@ -43,10 +43,10 @@ class PollingSampler {
     uint32_t packets_sent_;
     DiagCounters diag_;
 
-    /// The single shared line buffer. One assembly area for one sentence at a
-    /// time, which is all a strictly sequential loop can make use of.
-    char line_[NMEA_MAX_SENTENCE + 1];
-    size_t line_len_;
+    /// Shared with InterruptSampler so both samplers agree on where a sentence
+    /// starts and ends. One assembly area for one sentence at a time, which is
+    /// all a strictly sequential loop can make use of.
+    NmeaLineAssembler line_;
 };
 
 }  // namespace floodnet

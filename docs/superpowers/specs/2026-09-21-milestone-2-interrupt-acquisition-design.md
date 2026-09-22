@@ -1,7 +1,7 @@
 # FloodNet Milestone 2: Interrupt-Driven Acquisition
 
 Date: 2026-09-21
-Status: approved, pending implementation
+Status: implemented
 Parent spec: `docs/superpowers/specs/2026-09-20-floodnet-firmware-design.md`
 
 ## Purpose
@@ -19,8 +19,8 @@ Two of the three peripherals are already interrupt-served in milestone 1, as the
 
 What milestone 2 actually does:
 
-1. Replaces the blocking drain with per-stream SPSC ring buffers and a non-blocking loop.
-2. Adds the one genuinely missing interrupt path, on the BNO055 data-ready line.
+1. Replaces the blocking drain with a non-blocking loop that drains the existing `HardwareSerial` buffer on every pass; no ring buffer of ours sits on any data path (see "The GPS path is not a ring buffer").
+2. Adds the one genuinely missing interrupt path for the IMU, driven by a 100 Hz Teensy `IntervalTimer` because the BNO055 has no data-ready interrupt (see "Corrections to the parent spec").
 3. Makes radio transmission asynchronous so the loop stops spinning on a completion an ISR has already recorded.
 4. Replaces silent, byte-level loss with explicit, counted, policy-chosen packet drops.
 
@@ -36,6 +36,13 @@ It requires the producer to advance the consumer's index, which is exactly what 
 
 The buffer drops the **newest** element when full and increments a counter.
 The parent spec's stated reason for not blocking the producer still holds; only the choice of which element to discard changes.
+
+**BNO055 data-ready interrupt.**
+The parent spec's hardware table originally said the BNO055 has a "data-ready interrupt on GPIO", and an earlier draft of this document planned the IMU path around it.
+That is wrong: the BNO055's INT pin offers motion-triggered sources only (any-motion, slow/no-motion and high-g on the accelerometer, any-motion and high-rate on the gyroscope), and none of them signals that a fused sample is ready.
+The IMU path instead uses a Teensy `IntervalTimer` at 100 Hz, the sensor's fixed NDOF fusion output rate, whose handler sets a flag and returns.
+The INT pin is left unconnected.
+See `docs/hardware.md`, "IMU sample timing".
 
 **Counters in the packet stream.**
 The parent spec states that overflow, CRC, and sequence-gap counters "are part of the packet stream rather than debug-only output".
@@ -140,19 +147,21 @@ It reimplements a core peripheral driver, gains nothing measurable over the fram
 
 `IClock` gains `wait_for_event(uint32_t max_ms)`.
 This is not a simulation artifact.
-On Teensy it is `__WFI()`, sleep until an interrupt arrives or the cap expires, and it is also the primitive milestone 3's duty cycling will build on.
+On Teensy it is the `wfi` instruction, sleep until an interrupt arrives or the cap expires, and it is also the primitive milestone 3's duty cycling will build on.
 
 `IImuSource` gains `bool data_ready()`.
-The interrupt service routine on the BNO055 INT pin sets a flag and nothing more.
+The interrupt service routine of a 100 Hz `IntervalTimer`, not the BNO055's INT pin (see "Corrections to the parent spec"), sets a flag and nothing more.
 The I2C read stays in main context, because a blocking I2C transaction inside an interrupt handler is the wrong answer regardless of what it would do to the benchmark.
 The improvement over milestone 1 is that the loop stops issuing a speculative I2C read on every pass and reads only when the sensor says a sample exists.
 
 `IAsyncRadio` is new, as described under Decisions taken.
+It also carries `abort_transmit()`, because the parent spec requires radio operations to carry timeouts and an asynchronous transmit has no call to hang one on.
+The sampler owns the deadline, on its own clock, so it is testable on the host: a transmission still in flight after 5000 ms, the same bound as the blocking path's `waitPacketSent()`, is abandoned and counted.
 
 ### Application
 
 `src/sampler_interrupt.{hpp,cpp}`, new.
-`step()` drains the GPS ring buffer, parses completed sentences, reads the IMU when `data_ready()` reports a sample, starts a transmit when the radio is idle, and calls `wait_for_event()` when there is no work.
+`step()` drains the `HardwareSerial` receive buffer, parses completed sentences, reads the IMU when `data_ready()` reports a sample, starts a transmit when the radio is idle, and calls `wait_for_event()` when there is no work.
 It never blocks.
 
 `src/main.cpp` selects a sampler on the `FLOODNET_SAMPLER_POLLING` and `FLOODNET_SAMPLER_INTERRUPT` build flags.
@@ -172,8 +181,8 @@ A flag set in interrupt context and read in main context is one `volatile bool`,
 
 Outbound packet queue: 8 packets, and it drops the **oldest**.
 
-This is the opposite policy from the two ring buffers above, and the difference is not arbitrary.
-The GPS and IMU rings are fed by interrupt handlers, so they are SPSC and the producer cannot touch the consumer's index, which forces drop-newest.
+This is the opposite policy from `RingBuffer`'s, and the difference is not arbitrary.
+`RingBuffer` sits on no data path in this milestone, but it is designed to be fed by an interrupt handler, so it is SPSC and the producer cannot touch the consumer's index, which forces drop-newest.
 The outbound queue is produced and consumed entirely in main context, so it is under no such constraint and can drop whichever end is less useful.
 
 For position fixes the older packet is the less useful one: a receiver would rather have the node's current position than its position three seconds ago.
@@ -190,13 +199,14 @@ Three distinct counters, deliberately not merged:
 |---|---|---|
 | `gps_rx_overflows` | Bytes lost before the parser saw them | Zero. This going to zero is the milestone's core result. |
 | `tx_queue_drops` | Complete packets the node chose not to send | Non-zero at SF12. This is the honest cost. |
+| `tx_timeouts` | Transmissions abandoned because the radio never reported completion | Zero unless a completion edge is lost. Non-zero means a radio fault, not load. |
 
 Collapsing these into one number would make the interrupt build look lossy at SF12 for a reason that has nothing to do with acquisition.
 Keeping them separate is what makes the result readable.
 
 An earlier draft of this table carried a third counter, `imu_ring_overflows`, for samples discarded because only the newest is used.
 It is gone because the IMU ring it counted is gone: the path is a flag set by an interrupt plus a read in main context, which needs no queue and therefore discards nothing.
-That leaves `tx_queue_drops` as the only new counter, and it stays out of band for this milestone.
+That leaves `tx_queue_drops` and `tx_timeouts` as the only new counters, and both stay out of band for this milestone.
 
 ## What this milestone claims
 
@@ -250,6 +260,13 @@ If it does not, the measurement changed and the comparison is invalid until that
 
 The README gains a comparison table replacing the single-strategy results table, and keeps the existing reproduction command.
 
+**Result.**
+The SF7 prediction above did not hold.
+This spec predicted removing the IMU read from the transmit path would raise the interrupt build's SF7 ceiling to approximately 10.87 packets/sec, ahead of the polling baseline.
+The measured figures are `polling,4096,SF7` at 9.79 packets/sec against `interrupt,64/4096,SF7` at 9.07 packets/sec: the interrupt build is slower, not faster, at SF7.
+The deep-buffer polling build is the fastest SF7 configuration measured.
+This spec committed to publishing whatever the benchmark produced, and this is what it produced; see the README's Results section for the reading of it.
+
 ## Testing
 
 New suites:
@@ -265,7 +282,7 @@ All 46 existing tests stay green, and the benchmark must reproduce the published
 Deferred to later milestones as already recorded in the README, and not reopened here: mesh relay wiring, node state machine and sleep, sequence-gap counting, hardware watchdog, and host trace replay.
 
 Hardware validation is out of scope for this milestone.
-No board is available, so the IMU data-ready interrupt is written and compiled but exercised only against a fake.
+No board is available, so the IMU `IntervalTimer` path is written and compiled but exercised only against a fake.
 The README must say so plainly rather than let the reader assume otherwise.
 
 ## Open questions

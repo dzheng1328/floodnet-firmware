@@ -1,9 +1,10 @@
 #ifndef FLOODNET_TEST_SIM_CLOCK_HPP
 #define FLOODNET_TEST_SIM_CLOCK_HPP
 
-#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include <floodnet/hal/clock.hpp>
 
@@ -14,6 +15,11 @@ class ISimTick {
   public:
     virtual ~ISimTick() {}
     virtual void on_tick(uint32_t elapsed_ms) = 0;
+
+    /// True when this source has something the consumer could act on right
+    /// now. `SimClock::wait_for_event` stops advancing as soon as any source
+    /// says yes.
+    virtual bool pending() const = 0;
 };
 
 /// A clock that only moves when something asks it to, notifying observers.
@@ -24,8 +30,13 @@ class SimClock : public IClock {
 
     void add_observer(ISimTick *observer) {
         // Silently dropping an observer would make a future test fail with no
-        // indication why its fake stopped receiving ticks. Fail loudly instead.
-        assert(observer_count_ < MAX_OBSERVERS && "SimClock observer capacity exceeded");
+        // indication why its fake stopped receiving ticks. Fail loudly instead,
+        // and not with assert(): NDEBUG would strip it and leave the write
+        // below running off the end of observers_.
+        if (observer_count_ >= MAX_OBSERVERS) {
+            fprintf(stderr, "SimClock observer capacity exceeded\n");
+            abort();
+        }
         observers_[observer_count_++] = observer;
     }
 
@@ -36,6 +47,28 @@ class SimClock : public IClock {
         for (size_t i = 0; i < observer_count_; ++i) {
             observers_[i]->on_tick(ms);
         }
+    }
+
+    void wait_for_event(uint32_t max_ms) override {
+        // Advance a millisecond at a time rather than jumping to the next
+        // scheduled event, so observers keep receiving the same on_tick
+        // cadence they get from delay_ms. That is what keeps the polling
+        // sampler's measured behaviour identical to milestone 1.
+        for (uint32_t elapsed = 0; elapsed < max_ms; ++elapsed) {
+            if (any_pending()) {
+                return;
+            }
+            delay_ms(1);
+        }
+    }
+
+    bool any_pending() const {
+        for (size_t i = 0; i < observer_count_; ++i) {
+            if (observers_[i]->pending()) {
+                return true;
+            }
+        }
+        return false;
     }
 
   private:
