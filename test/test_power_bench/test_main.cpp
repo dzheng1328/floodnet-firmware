@@ -25,11 +25,16 @@ static uint32_t sleep_ua(Build build, uint32_t sleep_nA) {
     return build == Build::Interrupt ? 0 : sleep_nA / 1000;
 }
 
-/// A harness bound, not a result: a run that stopped before its end time
-/// without an empty battery did not measure what its line claims.
-static void assert_run_completed(PowerRig &rig, uint32_t end_ms) {
-    TEST_ASSERT_TRUE_MESSAGE(rig.clock().now_ms() >= end_ms || rig.power().depleted(),
-                             "run stopped before its end time with charge left");
+/// A harness bound, not a result: every scheduled fault must have begun, or
+/// the battery must have died before its start. Otherwise the run's line
+/// claims a fault that was never applied.
+static void assert_faults_started(PowerRig &rig) {
+    for (size_t i = 0; i < rig.fault_count(); ++i) {
+        const bool died_first = rig.power().depleted() &&
+                                rig.power().depleted_at_ms() <= rig.fault_start_ms(i);
+        TEST_ASSERT_TRUE_MESSAGE(rig.fault_started(i) || died_first,
+                                 "a scheduled fault never started and the battery was not empty");
+    }
 }
 
 static void print_downtime(const char *experiment, Build build, uint32_t sleep_nA,
@@ -65,7 +70,7 @@ void test_experiment_2_fault_recovery(void) {
         for (size_t f = 0; f < kFaultCount; ++f) {
             PowerRig rig(builds[b], kFaultRunSleepNA, kFaultRunCapacityNaMs);
             run_experiment_2_fault(rig, kFaults[f]);
-            assert_run_completed(rig, kFaultRunMs);
+            assert_faults_started(rig);
             const DowntimeReport report = rig.downtime(kFaultRunMs);
             print_downtime(kFaults[f].name, builds[b], kFaultRunSleepNA, report, kFaultRunMs,
                            report.down_at_end ? "0" : "1");
@@ -101,7 +106,7 @@ void test_experiment_3_combined_30_days(void) {
         rig.add_fault(FaultKind::RadioWedge, 11 * kDayMs, 0);
         rig.add_fault(FaultKind::Hang, 14 * kDayMs, 0);
         rig.run_until(kCombinedMs);
-        assert_run_completed(rig, kCombinedMs);
+        assert_faults_started(rig);
         print_downtime("combined_30d", builds[b], TEENSY_SLEEP_LOW_NA,
                        rig.downtime(kCombinedMs), kCombinedMs, "-");
     }
