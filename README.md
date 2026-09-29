@@ -393,7 +393,7 @@ Raising the sleep current by 19.86 mA raised the average by 19.592 mA, so the Te
 That makes the Teensy asleep 0.9865 x 6 = 5.919 mA of the 8.705 mA average, **68.0% of the energy at 6 mA**, and 0.9865 x 25.86 = 25.511 mA of 28.298 mA, **90.2% at 25.86 mA**.
 Everything else, the Teensy awake and every peripheral in every state, is the remaining 2.786 mA.
 The awake 1.35% is about 4.05 s of every 300 s cycle, consistent with a 1 s GPS hot start plus 3023 ms of SF12 airtime.
-Counting the Teensy awake at its 100 mA as well (100 x 0.01349 = 1.349 mA), the MCU draws 7.268 of the 8.705 mA, 83.5%, even at the lower sleep figure.
+Counting the Teensy awake at its 100 mA as well (100 x 0.01349 = 1.349 mA), the Teensy draws 7.268 of the 8.705 mA, 83.5%, even at the lower sleep figure.
 This derivation assumes the two runs spend the same share of time asleep; the one difference, a single 26 s cold start averaged over a shorter life in the 25.86 mA run, is not corrected for.
 
 **So the Teensy 4.1's sleep current is the finding.**
