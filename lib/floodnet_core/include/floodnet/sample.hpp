@@ -28,9 +28,9 @@ struct ImuSample {
 struct DiagCounters {
     uint16_t drops = 0;        ///< the node's IGpsSource::rx_overflows() value; see that
                                 ///< contract for the unit, which differs by implementation
-    uint16_t crc_errors = 0;   ///< Reserved. Always zero in milestone 1: a node in this
-                                ///< milestone only transmits and never receives a radio
-                                ///< packet, so it has nothing to fail a CRC check on.
+    uint16_t crc_errors = 0;   ///< Reserved. Always zero: a node only transmits and never
+                                ///< receives a radio packet, so it has nothing to fail a CRC
+                                ///< check on. Carried by v0x01 only; v0x02 drops it.
 };
 
 /// One paired observation, the unit this network transports.
