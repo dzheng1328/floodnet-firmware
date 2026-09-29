@@ -34,8 +34,16 @@ struct DutyCycledNodeConfig {
 /// This class only carries events from one to the other.
 class DutyCycledNode {
   public:
-    /// Persistent slot holding the boot counter.
-    static const size_t BOOT_COUNT_SLOT = 0;
+    /// Persistent slot holding the boot counter: SNVS_LPGPR3 on the Teensy.
+    ///
+    /// WARNING: not slot 0. imxrt.h defines SNVS_LPGPR at offset 0x68, the
+    /// legacy alias of LPGPR0 in the RT1060 reference manual's SNVS map, and
+    /// Snooze's SnoozeAlarm (6.3.9, hal/TEENSY_40/SnoozeAlarm.cpp:73) writes
+    /// SNVS_DEFAULT_PGD_VALUE there. Moving the wake source to SnoozeAlarm
+    /// would then overwrite a boot count kept in slot 0, and with it the
+    /// gateway's dedup key. Keep this slot clear of anything Snooze writes.
+    static const size_t BOOT_COUNT_SLOT = 3;
+    static_assert(BOOT_COUNT_SLOT < PERSISTENT_SLOTS, "boot counter slot out of range");
 
     DutyCycledNode(IGpsSource &gps, IImuSource &imu, IAsyncRadio &radio, IClock &clock,
                    IPower &power, IWatchdog &watchdog, IPersistentStore &store,

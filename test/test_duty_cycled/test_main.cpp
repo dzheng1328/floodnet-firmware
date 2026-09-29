@@ -125,6 +125,21 @@ void test_hang_is_reset_by_the_watchdog_and_reports_resume(void) {
     TEST_ASSERT_EQUAL_UINT16(2, rig->deliveries()[1].boot_count);
 }
 
+/// SnoozeAlarm writes SNVS_DEFAULT_PGD_VALUE to SNVS_LPGPR, the 0x68 alias of
+/// LPGPR0 (slot 0). The boot count must survive that write and a reset.
+void test_boot_count_survives_what_snoozealarm_writes_to_slot_0(void) {
+    std::unique_ptr<PowerRig> rig(make_rig());
+    TEST_ASSERT_EQUAL_UINT32(1, rig->store().read_u32(DutyCycledNode::BOOT_COUNT_SLOT));
+    rig->run_until(100000);
+    rig->store().write_u32(0, 0x41736166U);  // SNVS_DEFAULT_PGD_VALUE
+    rig->imu().hang_next_read(&rig->watchdog());
+    rig->run_until(kSlotMs + 120000);
+
+    TEST_ASSERT_EQUAL_UINT(1, rig->reboots());
+    TEST_ASSERT_EQUAL_UINT16(2, rig->node().boot_count());
+    TEST_ASSERT_EQUAL_UINT32(2, rig->store().read_u32(DutyCycledNode::BOOT_COUNT_SLOT));
+}
+
 void test_interrupt_build_streams_and_never_sleeps(void) {
     PowerRig rig(Build::Interrupt, TEENSY_SLEEP_LOW_NA, 0);
     rig.run_until(60000);
@@ -144,6 +159,7 @@ int main(int, char **) {
     RUN_TEST(test_refused_transmit_leaves_transmit_after_its_timeout);
     RUN_TEST(test_failing_imu_is_power_cycled_after_three_wakes);
     RUN_TEST(test_hang_is_reset_by_the_watchdog_and_reports_resume);
+    RUN_TEST(test_boot_count_survives_what_snoozealarm_writes_to_slot_0);
     RUN_TEST(test_interrupt_build_streams_and_never_sleeps);
     return UNITY_END();
 }

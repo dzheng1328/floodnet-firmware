@@ -133,6 +133,7 @@ class PowerRig {
     FakeRadio &radio() { return radio_; }
     FakePower &power() { return power_; }
     FakeWatchdog &watchdog() { return watchdog_; }
+    FakePersistentStore &store() { return store_; }
     const DutyCycledNode &node() const { return *node_; }
     const std::vector<Packet> &deliveries() const { return deliveries_; }
     const std::vector<GatewayRecord> &records() const { return records_; }
