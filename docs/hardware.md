@@ -8,6 +8,7 @@
 | GPS | u-blox NEO-M8N | UART, NMEA 0183, 9600 baud |
 | IMU | Bosch BNO055 | I2C at 400 kHz. No data-ready interrupt; see below. |
 | Radio | HopeRF RFM95W (SX1276) | SPI, 915 MHz |
+| Battery sense | 2 x 100 kΩ divider | Cell to Teensy pin 14 (A0), for `battery_mv` |
 
 ## Pin assignment
 
@@ -20,6 +21,7 @@
 | Radio SPI CS | 10 |
 | Radio reset | 9 |
 | Radio DIO0 | 2 |
+| Battery sense (divided) | 14 (A0) |
 
 ## Radio configuration
 
@@ -52,3 +54,23 @@ If a framework upgrade changes the bundled version, check `RH_RF95`'s API agains
 
 Adafruit BNO055 is scoped to the node builds rather than shared across all of them.
 The gateway has no IMU, and pulling the library into that build makes Adafruit BusIO fail to resolve `SPI.h`.
+
+## Power modes
+
+Milestone 3 puts each part into its own low-power mode rather than switching its supply, so the only hardware addition is the battery divider above.
+
+| Part | Low-power mode | Driver call |
+|---|---|---|
+| NEO-M8N | software backup, woken by UART RX activity | `TeensyGps::enter_backup()` / `wake()`, using `UBX-RXM-PMREQ` |
+| BNO055 | suspend | `TeensyImu::suspend()` / `resume()` |
+| RFM95W | sleep | `TeensyRadio::sleep()` / `wake()` |
+| Teensy 4.1 | Snooze `deepSleep()` with a GPT timer wake | `TeensyPower::sleep_until()` |
+
+The bundled Snooze 6.3.9 miscounts time on Teensy 4: after a timer wake it advances `millis()` by 32.768 ms per slept second instead of 1000.
+`TeensyPower::sleep_until()` adds the difference itself; the comment there cites the library line.
+This is read from the library source and has not been observed on a board.
+
+The watchdog is WDOG1 at 90 s, programmed directly through `imxrt.h`.
+The boot counter lives in `SNVS_LPGPR0`, which survives resets while SNVS is powered.
+
+None of this has run on hardware.

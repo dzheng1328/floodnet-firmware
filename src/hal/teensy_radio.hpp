@@ -79,6 +79,20 @@ class TeensyRadio : public IAsyncRadio {
         driver_.setModeIdle();
     }
 
+    /// RFM95W sleep mode (0.2 uA typical). The FIFO is not retained.
+    void sleep() {
+        if (ready_) {
+            driver_.sleep();
+        }
+    }
+
+    /// Standby, ready for send().
+    void wake() {
+        if (ready_) {
+            driver_.setModeIdle();
+        }
+    }
+
     int receive(uint8_t *buf, size_t len) override {
         if (!ready_ || !driver_.available()) {
             return -1;

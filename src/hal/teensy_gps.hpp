@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 #include <floodnet/hal/gps.hpp>
+#include <floodnet/ubx.hpp>
 
 namespace floodnet {
 
@@ -53,6 +54,22 @@ class TeensyGps : public IGpsSource {
         if (port_.available() >= RX_BUFFER_BYTES && dropped_ < 0xFFFF) {
             ++dropped_;
         }
+    }
+
+    /// Software backup via UBX-RXM-PMREQ, keeping ephemeris for a hot start.
+    /// The frame asks for wake-up on UART RX activity; see wake().
+    void enter_backup() {
+        uint8_t frame[UBX_PMREQ_BACKUP_SIZE];
+        const size_t len = ubx_pmreq_backup(frame, sizeof(frame));
+        port_.write(frame, len);
+        port_.flush();  // wait until the last byte is out before anything sleeps
+    }
+
+    /// Any edge on the module's RX line wakes it from backup. Unverified on a
+    /// board, like enter_backup().
+    void wake() {
+        port_.write(static_cast<uint8_t>(0xFF));
+        port_.flush();
     }
 
   private:
