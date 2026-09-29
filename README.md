@@ -396,11 +396,14 @@ The awake 1.35% is about 4.05 s of every 300 s cycle, consistent with a 1 s GPS 
 Counting the Teensy awake at its 100 mA as well (100 x 0.01349 = 1.349 mA), the MCU draws 7.268 of the 8.705 mA, 83.5%, even at the lower sleep figure.
 This derivation assumes the two runs spend the same share of time asleep; the one difference, a single 26 s cold start averaged over a shorter life in the 25.86 mA run, is not corrected for.
 
-**So the MCU choice is the finding.**
+**So the Teensy 4.1's sleep current is the finding.**
 The design doc committed in advance to saying so if the Teensy's sleep current dominated the energy budget, and it does.
 Even with every peripheral and every awake second removed, a 3200 mAh cell under a sleeping Teensy lasts 3200 / 6 = 533 h, 22.2 days, at 6 mA, and 3200 / 25.86 = 124 h, 5.16 days, at 25.86 mA.
 No change to the report schedule can take this build past those ceilings, and which ceiling applies depends on a current for which the design doc found no data sheet value.
-The next lever is the sleep current of the MCU, not the firmware; this milestone does not measure any alternative part.
+Both sleep figures are whole-board forum measurements, and the 6 mA one was taken from a 5 V supply.
+Whether that current comes from the MCU itself, the board around it (its regulator and power LED), or the sleep mode Snooze makes available is not separable here.
+The sleep mode is itself a firmware choice: Snooze `hibernate()` was rejected in the design doc because it is reported never to wake on Teensy 4.1.
+This milestone does not measure any alternative part, board or sleep mode.
 
 For scale, the `interrupt` build averages 3200 mAh x 3 600 000 ms/h / 45204206 ms = 254.84 mA, consistent with the Teensy, GPS, IMU and a nearly always transmitting radio all on at once.
 The `duty_cycled` build lasts 1323301745 / 45204206 = 29.3 times as long at 6 mA, and 407101031 / 45204206 = 9.0 times as long at 25.86 mA.
@@ -650,7 +653,7 @@ It is recorded here as future work so that "did anything change after you saw th
 - **`battery_mv` in simulation is a placeholder.** It falls in a straight line from 4200 mV at full to 3000 mV at empty.
   That is telemetry plumbing, not a discharge model, and no result above depends on it.
 - **The experiments run on every push.** CI runs `pio test -e native`, which includes `test_power_bench`.
-  On the development machine used for this milestone the whole native suite took 27.16 s, 189 test cases, of which `test_power_bench` was 18.27 s; a CI runner's time will differ.
+  In the saved experiment output `test_power_bench` took 18.44 s, and the whole native suite of 189 test cases took about 24 to 28 s across the runs recorded on the development machine; a CI runner's time will differ.
 
 ### Recovery exists only in `node_duty_cycled`
 
