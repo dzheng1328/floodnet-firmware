@@ -138,6 +138,12 @@ class PowerRig {
     const std::vector<GatewayRecord> &records() const { return records_; }
     size_t reboots() const { return reboots_; }
 
+    /// Scheduled faults, in add_fault() order, and whether each has begun.
+    /// A run that never reached a fault's start did not measure that fault.
+    size_t fault_count() const { return faults_.size(); }
+    bool fault_started(size_t i) const { return faults_[i].started; }
+    uint32_t fault_start_ms(size_t i) const { return faults_[i].start_ms; }
+
   private:
     struct Fault {
         FaultKind kind;

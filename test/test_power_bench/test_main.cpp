@@ -5,6 +5,7 @@
 #include <floodnet/downtime.hpp>
 
 #include "../support/current_model.hpp"
+#include "../support/power_experiments.hpp"
 #include "../support/power_rig.hpp"
 
 using namespace floodnet;
@@ -12,14 +13,8 @@ using namespace floodnet;
 void setUp(void) {}
 void tearDown(void) {}
 
-// Frozen in the milestone 3 design doc, "Experiments", before any of this ran.
-// Changing any of these after seeing output must be recorded in the README.
-static const uint32_t kHourMs = 3600000UL;
-static const uint32_t kDayMs = 24UL * kHourMs;
-static const uint32_t kLifeCapMs = 45UL * kDayMs;  // uint32 ms tops out at 49.7 days
-static const uint32_t kFaultRunMs = 24UL * kHourMs;
-static const uint32_t kFaultAtMs = 2UL * kHourMs;
-static const uint32_t kCombinedMs = 30UL * kDayMs;
+// The experiment constants live in power_experiments.hpp, shared with
+// test_fault_evidence so the pinned facts and the printed runs cannot drift.
 
 static const char *build_name(Build build) {
     return build == Build::Interrupt ? "interrupt" : "duty_cycled";
@@ -64,32 +59,15 @@ void test_experiment_1_battery_life(void) {
     run_life(Build::DutyCycled, TEENSY_SLEEP_HIGH_NA);
 }
 
-struct FaultCase {
-    const char *name;
-    FaultKind kind;
-    uint32_t duration_ms;  // 0: does not end by itself
-};
-
-static const FaultCase kFaults[] = {
-    {"fault_lost_completion", FaultKind::LostCompletion, 0},
-    {"fault_sky_blockage", FaultKind::SkyBlockage, 2UL * 3600000UL},
-    {"fault_imu_failing", FaultKind::ImuFailing, 6UL * 3600000UL},
-    {"fault_radio_wedge", FaultKind::RadioWedge, 0},
-    {"fault_hang", FaultKind::Hang, 0},
-};
-
 void test_experiment_2_fault_recovery(void) {
     const Build builds[] = {Build::Interrupt, Build::DutyCycled};
     for (size_t b = 0; b < 2; ++b) {
-        for (size_t f = 0; f < sizeof(kFaults) / sizeof(kFaults[0]); ++f) {
-            PowerRig rig(builds[b], TEENSY_SLEEP_LOW_NA, 0);
-            const uint32_t end =
-                kFaults[f].duration_ms == 0 ? 0 : kFaultAtMs + kFaults[f].duration_ms;
-            rig.add_fault(kFaults[f].kind, kFaultAtMs, end);
-            rig.run_until(kFaultRunMs);
+        for (size_t f = 0; f < kFaultCount; ++f) {
+            PowerRig rig(builds[b], kFaultRunSleepNA, kFaultRunCapacityNaMs);
+            run_experiment_2_fault(rig, kFaults[f]);
             assert_run_completed(rig, kFaultRunMs);
             const DowntimeReport report = rig.downtime(kFaultRunMs);
-            print_downtime(kFaults[f].name, builds[b], TEENSY_SLEEP_LOW_NA, report, kFaultRunMs,
+            print_downtime(kFaults[f].name, builds[b], kFaultRunSleepNA, report, kFaultRunMs,
                            report.down_at_end ? "0" : "1");
         }
     }
