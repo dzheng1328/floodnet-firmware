@@ -44,11 +44,11 @@ It holds no HAL reference, so every transition is unit-tested with hand-built ev
 |---|---|---|---|
 | `BOOT` | all | peripherals initialised | `ACQUIRE` |
 | `ACQUIRE` | GPS, IMU | one valid fix queued, or `ACQUIRE_TIMEOUT_MS` elapsed | `TRANSMIT` |
-| `TRANSMIT` | radio | queue empty and nothing in flight | `SLEEP` |
+| `TRANSMIT` | radio | queue empty and nothing in flight, or `TRANSMIT_TIMEOUT_MS` elapsed | `SLEEP` |
 | `SLEEP` | nothing | next scheduled slot, or a watchdog chunk boundary | `ACQUIRE`, or `SLEEP` again |
 
-Events: `PeripheralsReady`, `FixQueued`, `TxIdle`, `Timeout`, `WakeTimer`.
-Actions: `SetPower(peripheral, state)`, `QueueHeartbeat`, `KickWatchdog`, `SleepUntil(ms)`, `PowerCycle(peripheral)`.
+Events: `PeripheralsReady`, `FixQueued`, `FixQueuedNoImu`, `TxSucceeded`, `TxFailed`, and `Tick`, which carries the time and is how timeouts, slot wakes, and watchdog chunk boundaries are detected.
+Actions: the power plan for the new state, `queue_heartbeat`, `kick_watchdog`, `sleep_until_ms`, `power_cycle_radio`, `power_cycle_imu`.
 
 Decisions inside the state machine:
 
@@ -85,6 +85,7 @@ enum class PowerState : uint8_t { On, Low };
 class IPower {
   public:
     virtual void set_power(Peripheral p, PowerState s) = 0;
+    virtual bool power_cycle(Peripheral p) = 0;       // off, on, and re-initialise the driver
     virtual void sleep_until(uint32_t wake_ms) = 0;  // MCU lowest RAM-retaining mode
     virtual uint16_t battery_mv() = 0;
 };
@@ -106,11 +107,13 @@ One slot is used, for `boot_count`.
 ### Application
 
 **`src/duty_cycled_node.hpp` / `.cpp`: `DutyCycledNode`.**
-Composes `NodeStateMachine`, an unmodified `InterruptSampler`, and the three new HAL interfaces.
+Composes `NodeStateMachine`, `InterruptSampler`, and the three new HAL interfaces.
 While awake it calls `sampler.step()` exactly as `node_interrupt` does today; the state machine decides only what is powered and when the sampler runs.
+Before powering the GPS on it drains every byte still in the receive buffer, so a sentence left over from the previous wake cannot be parsed and stamped with the new wake's time.
 
-`InterruptSampler` is not modified.
-The milestone 2 benchmark rows therefore stay valid by construction, the same guarantee milestone 2 gave milestone 1, and the benchmark rerun confirms it.
+`InterruptSampler` gains four additive members and no changed behaviour: a constructor argument selecting the wire version (defaulting to v0x01), `set_node_status(boot_count, battery_mv)`, `enqueue_heartbeat()`, and `last_record_imu_valid()`.
+The sampler encodes packets inside `service_radio()`, so a v0x02 node cannot be built around it without some change, and these four are the smallest set that serves it.
+With the defaults, `node_interrupt` behaves exactly as before; the benchmark rerun, which must reproduce every published row bit for bit, is the check.
 
 **Teensy implementations** in `src/hal/`: `TeensyPower`, `TeensyWatchdog`, `TeensyPersistentStore`.
 
@@ -132,6 +135,7 @@ CI compiles all four firmware targets.
 |---|---|---|
 | `ACQUIRE_TIMEOUT_MS` | 60 000 | Over twice the NEO-M8N's 26 s typical cold-start time to first fix (GPS + GLONASS, NEO-M8 datasheet UBX-15031086, TTFF table). A hot start is 1 s. |
 | `TX_TIMEOUT_MS` | 5 000 | Existing sampler constant, unchanged. |
+| `TRANSMIT_TIMEOUT_MS` | 10 000 | Twice `TX_TIMEOUT_MS`, so a radio that refuses `begin_transmit()` outright cannot hold the node in `TRANSMIT`. Counts as a failed cycle. |
 | `WATCHDOG_TIMEOUT_MS` | 90 000 | Above the longest legitimate time between two transitions (`ACQUIRE_TIMEOUT_MS`), below WDOG1's 128 s ceiling. |
 | `SLEEP_CHUNK_MS` | 60 000 | A 5-minute sleep exceeds the watchdog ceiling, so `SLEEP` wakes every 60 s, kicks, and sleeps again. |
 
@@ -144,8 +148,8 @@ The cost of the chosen approach is four extra wakes per report cycle, each only 
 | Fault | Detected by | Recovery | Visible at the gateway as |
 |---|---|---|---|
 | Lost DIO0 edge, one packet | sampler's existing `TX_TIMEOUT_MS` | abandon the packet, sleep as normal | missing report; `tx_timeouts` increments in-band |
-| Radio wedged, every attempt fails | `RADIO_FAIL_LIMIT` = 3 consecutive cycles with no completed transmit | `PowerCycle(Radio)`, then `begin()` | reports resume; `tx_timeouts` shows the gap's cause |
-| IMU reads fail | read failure on every attempt in a wake | send the fix with `imu_valid = 0`; `PowerCycle(Imu)` after 3 consecutive failed wakes | `imu_valid = 0` |
+| Radio wedged, every attempt fails | `RADIO_FAIL_LIMIT` = 3 consecutive `TRANSMIT` states that end with no completed transmit | `PowerCycle(Radio)`, then `begin()` | reports resume; `tx_timeouts` shows the gap's cause |
+| IMU reads fail | the wake's fix is queued with `imu_valid = 0` | send the fix with `imu_valid = 0`; `PowerCycle(Imu)` after 3 consecutive failed wakes | `imu_valid = 0` |
 | No GPS lock | `ACQUIRE_TIMEOUT_MS` | heartbeat, keep the schedule | `gps_valid = 0` heartbeats |
 | Hang, for example an I2C read that never returns | WDOG1 | full MCU reset | `boot_count` increments |
 
@@ -255,7 +259,7 @@ Each down interval is attributed to one cause:
 | `no_gps` | `gps_valid = 0` heartbeats arriving during the interval |
 | `radio` | node alive, nothing arriving, `tx_timeouts` higher in the next record |
 | `reboot` | `boot_count` higher in the next record |
-| `hung` | node alive, never reported again (milestone 2 build only) |
+| `silent` | none of the above: the node is down and nothing in-band explains why |
 
 ### Experiments
 
@@ -266,7 +270,8 @@ They are reported separately because a single blended percentage is mostly a fun
    Reported in days, at both Teensy sleep currents.
 2. **Fault recovery.** Unlimited battery, so a fault's cost is not hidden behind an early battery death.
    Each fault injected alone into an otherwise clean 24-hour run, at hour 2.
-   Reported as downtime caused by that fault, in minutes.
+   Reported as downtime caused by that fault, in minutes, plus whether the node recovered before the run ended.
+   For a build that never recovers, the minutes are only the time left in the run, so the `recovered` column is the result and the minutes are not.
 3. **Combined 30 days.** 3200 mAh and this fault schedule:
    - day 2: lost DIO0 edge
    - day 5: 2-hour sky blockage
@@ -279,10 +284,11 @@ They are reported separately because a single blended percentage is mostly a fun
 Output lines follow the `BENCH` convention:
 
 ```
-DOWNTIME,experiment,build,sleep_current_ua,cause,down_ms,scenario_ms
+DOWNTIME,experiment,build,sleep_current_ua,cause,down_ms,scenario_ms,recovered
 ```
 
 `sleep_current_ua` is 0 for the milestone 2 build, which never sleeps.
+`recovered` is `1` or `0` in experiment 2 and `-` elsewhere.
 
 ### Rules
 
@@ -308,6 +314,27 @@ DOWNTIME,experiment,build,sleep_current_ua,cause,down_ms,scenario_ms
 Nothing in this milestone runs on a Teensy.
 Specifically unverified: Snooze `deepSleep` wake alongside WDOG1 on current Teensyduino, the real sleep current of this board with these peripherals attached, `UBX-RXM-PMREQ` backup and hot start on the actual module, and the SNVS register retention across a WDOG1 reset.
 Datasheet currents are typical values, and a real board adds regulator quiescent current, the power LED, and leakage.
+
+## Revisions made while planning
+
+Recorded here because the design above was approved before these were found.
+All were made before any measurement code existed, and none changes the frozen scenario.
+
+- **`InterruptSampler` is extended, not left untouched.** See "Application". The guarantee for milestone 2's figures moves from "by construction" to "by default arguments, confirmed by a bit-identical benchmark rerun".
+- **`IPower::power_cycle()`.** Re-initialising a driver after power-cycling it is driver-specific, so it belongs behind the interface rather than in `DutyCycledNode`.
+- **`TRANSMIT_TIMEOUT_MS`.** Without it, a radio that refuses every `begin_transmit()` would keep the node in `TRANSMIT` until the watchdog fired.
+- **Cause `hung` renamed `silent` and redefined.** The gateway cannot tell a hung node from any other silent one, and a milestone 2 node under a sky blockage is silent too, since it sends no heartbeat.
+- **`recovered` column** in experiment 2, for the reason given there.
+- **IMU failure detection** uses the queued record's `imu_valid` rather than a read-failure counter, which also covers a sensor that answers but never inside the pairing window.
+- **GPS drain before power-on**, described under "Application".
+- **Snooze `millis()` compensation is wrong on Teensy 4.** Found by reading the bundled Snooze 6.3.9 source, `src/hal/TEENSY_40/SnoozeTimer.cpp`: `setTimer()` takes whole seconds and stores `period = seconds * 32768`, and the wake handler advances `systick_millis_count` by `period / 1000`, which is 32.768 ms per slept second instead of 1000 ms.
+  Left alone, a node would believe a 60 s sleep lasted about 2 s and its 5-minute schedule would stretch about thirty-fold.
+  `TeensyPower::sleep_until()` therefore sleeps whole seconds only, adds the missing milliseconds to `systick_millis_count` itself after each wake, and covers the sub-second remainder with `wfi`.
+  The library is not patched or vendored.
+  The effect is read from source, not observed on a board.
+- **Battery sense.** `battery_mv` needs a divider the bill of materials did not have: two 100 kΩ resistors from the cell to Teensy pin 14 (A0).
+  In simulation, `battery_mv` falls linearly from 4200 mV at full to 3000 mV at empty.
+  That line is a telemetry placeholder, not a discharge model, and no reported result depends on it.
 
 ## Out of scope
 
