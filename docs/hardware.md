@@ -71,6 +71,16 @@ The bundled Snooze 6.3.9 miscounts time on Teensy 4: after a timer wake it advan
 This is read from the library source and has not been observed on a board.
 
 The watchdog is WDOG1 at 90 s, programmed directly through `imxrt.h`.
-The boot counter lives in `SNVS_LPGPR0`, which survives resets while SNVS is powered.
+Both of its low-power suspend bits in `WDOG_WCR` are left clear: `WDW` (bit 7), which suspends it in WAIT mode, and `WDZST` (bit 0), which suspends it in STOP and DOZE.
+The bundled Snooze 6.3.9 enters WAIT mode: `hal_deepSleep()` in `src/hal/TEENSY_40/hal.c` sets `CCM_CLPCR_LPM(0x01)` at line 789, so `WDW` is the bit that matters for this build.
+The `WDW`-to-WAIT mapping is a reading of the RT1060 reference manual's `WDOG_WCR` description and has not been verified on a board.
+
+**First bench test: does WDOG1 count while its `CCM_CCGR3` gate is off during `deepSleep`?**
+The same function rewrites `CCM_CCGR3` at `hal.c:805`, keeping only the ACMP1-4 gates and `0x10000000`, which clears `CCM_CCGR3_WDOG1` (bits 17-16 in `imxrt.h`), and restores the register on wake at `hal.c:851`.
+If WDOG1 stops counting while its clock is gated, a timer wake that never fires would hang the node with nothing to reset it, whatever `WDW` and `WDZST` say.
+This is read from source and is the first thing to measure on a board.
+
+The boot counter lives in `SNVS_LPGPR3`, which survives resets while SNVS is powered.
+It is not in `LPGPR0`, because Snooze's `SnoozeAlarm` writes `SNVS_LPGPR` (offset 0x68, the legacy alias of `LPGPR0`) and would overwrite it.
 
 None of this has run on hardware.

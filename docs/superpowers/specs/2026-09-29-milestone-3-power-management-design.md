@@ -102,7 +102,7 @@ class IPower {
 **`IWatchdog`.** `begin(timeout_ms)` and `kick()`.
 
 **`IPersistentStore`.** `read_u32(slot)` and `write_u32(slot, value)` for values that must survive a watchdog reset.
-One slot is used, for `boot_count`.
+One slot is used, for `boot_count`: slot 3, `SNVS_LPGPR3` on the Teensy (see "Revisions made while planning").
 
 ### Application
 
@@ -137,11 +137,14 @@ CI compiles all four firmware targets.
 | `TX_TIMEOUT_MS` | 5 000 | Existing sampler constant, unchanged. |
 | `TRANSMIT_TIMEOUT_MS` | 10 000 | Twice `TX_TIMEOUT_MS`, so a radio that refuses `begin_transmit()` outright cannot hold the node in `TRANSMIT`. Counts as a failed cycle. |
 | `WATCHDOG_TIMEOUT_MS` | 90 000 | Above the longest legitimate time between two transitions (`ACQUIRE_TIMEOUT_MS`), below WDOG1's 128 s ceiling. |
-| `SLEEP_CHUNK_MS` | 60 000 | A 5-minute sleep exceeds the watchdog ceiling, so `SLEEP` wakes every 60 s, kicks, and sleeps again. |
+| `SLEEP_CHUNK_MS` | 60 000 | A 5-minute sleep exceeds the configured 90 s watchdog timeout (`WATCHDOG_TIMEOUT_MS`), which is the binding limit rather than WDOG1's 128 s hardware ceiling, so `SLEEP` wakes every 60 s, kicks, and sleeps again. |
 
-WDOG1 can instead be suspended in low-power modes (`WCR[WDZST]`, exposed by the WDT_T4 library as `lp_suspend`).
-That is rejected: a wake timer that never fires would then hang the node with the watchdog paused, which is exactly the failure the watchdog exists for.
-The cost of the chosen approach is four extra wakes per report cycle, each only long enough to kick, and the simulation charges them.
+WDOG1 can instead be suspended in low-power modes by two bits of `WDOG_WCR`: `WDW` (bit 7) suspends it in WAIT mode, and `WDZST` (bit 0, exposed by the WDT_T4 library as `lp_suspend`) suspends it in STOP and DOZE.
+Snooze 6.3.9's `hal_deepSleep()` enters WAIT mode (`src/hal/TEENSY_40/hal.c:789` sets `CCM_CLPCR_LPM(0x01)`), so `WDW` is the bit that governs this build.
+The mapping of `WDW` to WAIT is a reading of the RT1060 reference manual's `WDOG_WCR` description, unverified on a board.
+Suspending is rejected, and both bits are left clear: a wake timer that never fires would then hang the node with the watchdog paused, which is exactly the failure the watchdog exists for.
+The cost of the chosen approach is four extra wakes per report cycle, each only long enough to kick.
+The simulation charges 0 ms awake per chunk renewal: a renewal is a state transition with no modelled awake time, so those wakes cost nothing in the energy figures.
 
 ## Faults and recovery
 
@@ -258,7 +261,7 @@ Each down interval is attributed to one cause:
 | `battery` | node died; known to the simulation, not inferable at the gateway |
 | `no_gps` | `gps_valid = 0` heartbeats arriving during the interval |
 | `radio` | node alive, nothing arriving, `tx_timeouts` higher in the next record |
-| `reboot` | `boot_count` higher in the next record |
+| `reboot` | `boot_count` different in the next record |
 | `silent` | none of the above: the node is down and nothing in-band explains why |
 
 ### Experiments
@@ -318,7 +321,7 @@ Datasheet currents are typical values, and a real board adds regulator quiescent
 ## Revisions made while planning
 
 Recorded here because the design above was approved before these were found.
-All were made before any measurement code existed except the last three, which say when they were made in their own entries.
+All were made before any measurement code existed except those whose entries say when they were made.
 None changes the frozen scenario.
 
 - **`InterruptSampler` is extended, not left untouched.** See "Application". The guarantee for milestone 2's figures moves from "by construction" to "by default arguments, confirmed by a bit-identical benchmark rerun".
@@ -344,11 +347,23 @@ None changes the frozen scenario.
 - **Experiments 2 and 3 assert completion only.** Each run asserts that it reached its end time or a depleted battery, and nothing about a measured value.
   A test that asserts nothing is a defect, and asserting on a measured value would be tuning.
   Made while writing the experiment code, before its first run.
+  Superseded in the final fix wave, see below: that check could not fail.
 - **Null control also asserts the run ended fresh.** It checks `down_at_end` is false as well as all downtime being `startup`.
   Without it, a harness that never delivers a valid record passes vacuously, because every interval before the first valid record is attributed to `startup`.
   Added after review of the experiment code; the rerun that verified it printed every `LIFE` and `DOWNTIME` line byte-identical to the first run, so no measured value changed.
 - **Benchmark identity check compares the first 12 `BENCH` lines.** `pio test -v` echoes 4 of the existing rows a second time, so an unfiltered diff reports 4 lines even on an untouched tree.
   Made during implementation; it changes how the check reads the output, not what the benchmark measures.
+
+- **Completion check replaced by a fault-started check.** `run_until()` only returns at its end time or on a depleted battery, so the completion assertion above could not fail.
+  Experiments 2 and 3 now assert that every scheduled fault started, or that the battery died at or before that fault's start time.
+  A deliberately broken local edit that never starts the hang fault made both experiments fail; it was reverted and never committed.
+  Made after the first run; it changes what the harness checks, not what it measures, and every `LIFE` and `DOWNTIME` line reran byte-identical.
+- **Boot counter moved from slot 0 to slot 3.** `imxrt.h:8735` defines `SNVS_LPGPR` at offset 0x68, which the RT1060 reference manual's SNVS map gives as the legacy alias of `LPGPR0`, and Snooze 6.3.9's `SnoozeAlarm.cpp:73` writes `SNVS_DEFAULT_PGD_VALUE` there.
+  Switching the wake source to SnoozeAlarm would then overwrite a boot count kept in slot 0, and with it the gateway's dedup key.
+  `DutyCycledNode::BOOT_COUNT_SLOT` is now 3 (`SNVS_LPGPR3`), and `test_boot_count_survives_what_snoozealarm_writes_to_slot_0` pins it.
+  Made after the first run; the simulated store is indifferent to the slot, and every `LIFE` and `DOWNTIME` line reran byte-identical.
+- **Probe-only README facts pinned by tests.** Facts the README gave from a diagnostic probe run during implementation are now asserted by `test/test_fault_evidence/`, which runs experiment 2's configuration through the same helper as `test_power_bench`.
+  Every value reproduced as published; none was adjusted.
 
 ## Out of scope
 

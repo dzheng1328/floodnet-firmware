@@ -10,11 +10,21 @@ namespace floodnet {
 /// WDOG1, programmed directly from imxrt.h rather than through a library.
 ///
 /// WCR[WT] counts in half seconds: the timeout is (WT + 1) x 0.5 s, up to
-/// 128 s (Linux imx2_wdt, IMX2_WDT_MAX_TIME). WDZST is left clear on purpose:
-/// suspending the watchdog in low-power modes would let a wake timer that
-/// never fires hang the node with nothing to reset it. See the milestone 3
-/// design doc, "Watchdog timing". Whether WDOG1 keeps counting through Snooze
-/// deepSleep is unverified without a board.
+/// 128 s (Linux imx2_wdt, IMX2_WDT_MAX_TIME).
+///
+/// Both low-power suspend bits are left clear on purpose, because suspending
+/// the watchdog would let a wake timer that never fires hang the node with
+/// nothing to reset it: WCR[WDW] (bit 7), which suspends WDOG1 in WAIT mode,
+/// and WCR[WDZST] (bit 0), which suspends it in STOP and DOZE. Snooze 6.3.9's
+/// hal_deepSleep() enters WAIT (src/hal/TEENSY_40/hal.c:789 sets
+/// CCM_CLPCR_LPM(0x01)), so WDW is the bit that governs this build. The WDW to
+/// WAIT mapping is read from the RT1060 reference manual's WDOG_WCR
+/// description, not verified on a board. See the milestone 3 design doc,
+/// "Watchdog timing".
+///
+/// Unverified without a board, and the first bench test: whether WDOG1 counts
+/// at all during deepSleep. hal_deepSleep() rewrites CCM_CCGR3 (hal.c:805),
+/// clearing the WDOG1 clock gate, and restores it only on wake (hal.c:851).
 class TeensyWatchdog : public IWatchdog {
   public:
     void begin(uint32_t timeout_ms) override {

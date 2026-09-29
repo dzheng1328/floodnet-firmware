@@ -26,8 +26,9 @@ struct NodeTiming {
     /// Twice the sampler's 5 s transmit timeout, so a radio refusing every
     /// begin_transmit() cannot hold the node in TRANSMIT.
     uint32_t transmit_timeout_ms = 10000;
-    /// A 5-minute sleep outlasts WDOG1's 128 s ceiling, so sleep is taken in
-    /// chunks, each one a transition that kicks the watchdog.
+    /// A 5-minute sleep outlasts the configured 90 s watchdog timeout (the
+    /// binding limit, not WDOG1's 128 s hardware ceiling), so sleep is taken
+    /// in chunks, each one a transition that kicks the watchdog.
     uint32_t sleep_chunk_ms = 60000;
     uint8_t radio_fail_limit = 3;
     uint8_t imu_fail_limit = 3;

@@ -1,0 +1,195 @@
+********************************************************************************
+Obsolete PIO Core v6.1.18 is used (previous was 6.2.0)
+Please remove multiple PIO Cores from a system:
+https://docs.platformio.org/en/latest/core/installation/troubleshooting.html
+********************************************************************************
+Collected 16 tests (test_benchmark, test_downtime, test_duty_cycled, test_fakes, test_interrupt, test_mesh, test_nmea, test_node_state, test_packet, test_packet_queue, test_pairing, test_polling, test_power_bench, test_ring_buffer, test_sample, test_ubx)
+
+Processing test_power_bench in native environment
+--------------------------------------------------------------------------------
+Building...
+
+
+Testing...
+DOWNTIME,null_control,interrupt,0,startup,29130,86400000,-
+DOWNTIME,null_control,interrupt,0,battery,0,86400000,-
+DOWNTIME,null_control,interrupt,0,no_gps,0,86400000,-
+DOWNTIME,null_control,interrupt,0,radio,0,86400000,-
+DOWNTIME,null_control,interrupt,0,reboot,0,86400000,-
+DOWNTIME,null_control,interrupt,0,silent,0,86400000,-
+DOWNTIME,null_control,duty_cycled,6000,startup,29123,86400000,-
+DOWNTIME,null_control,duty_cycled,6000,battery,0,86400000,-
+DOWNTIME,null_control,duty_cycled,6000,no_gps,0,86400000,-
+DOWNTIME,null_control,duty_cycled,6000,radio,0,86400000,-
+DOWNTIME,null_control,duty_cycled,6000,reboot,0,86400000,-
+DOWNTIME,null_control,duty_cycled,6000,silent,0,86400000,-
+test/test_power_bench/test_main.cpp:130:test_null_control_shows_no_downtime_after_the_first_report:PASS
+LIFE,interrupt,0,45204206,0.52
+LIFE,duty_cycled,6000,1323301745,15.32
+LIFE,duty_cycled,25860,407101031,4.71
+test/test_power_bench/test_main.cpp:131:test_experiment_1_battery_life:PASS
+DOWNTIME,fault_lost_completion,interrupt,0,startup,29130,86400000,1
+DOWNTIME,fault_lost_completion,interrupt,0,battery,0,86400000,1
+DOWNTIME,fault_lost_completion,interrupt,0,no_gps,0,86400000,1
+DOWNTIME,fault_lost_completion,interrupt,0,radio,0,86400000,1
+DOWNTIME,fault_lost_completion,interrupt,0,reboot,0,86400000,1
+DOWNTIME,fault_lost_completion,interrupt,0,silent,0,86400000,1
+DOWNTIME,fault_sky_blockage,interrupt,0,startup,29130,86400000,1
+DOWNTIME,fault_sky_blockage,interrupt,0,battery,0,86400000,1
+DOWNTIME,fault_sky_blockage,interrupt,0,no_gps,0,86400000,1
+DOWNTIME,fault_sky_blockage,interrupt,0,radio,0,86400000,1
+DOWNTIME,fault_sky_blockage,interrupt,0,reboot,0,86400000,1
+DOWNTIME,fault_sky_blockage,interrupt,0,silent,6578310,86400000,1
+DOWNTIME,fault_imu_failing,interrupt,0,startup,29130,86400000,1
+DOWNTIME,fault_imu_failing,interrupt,0,battery,0,86400000,1
+DOWNTIME,fault_imu_failing,interrupt,0,no_gps,0,86400000,1
+DOWNTIME,fault_imu_failing,interrupt,0,radio,0,86400000,1
+DOWNTIME,fault_imu_failing,interrupt,0,reboot,0,86400000,1
+DOWNTIME,fault_imu_failing,interrupt,0,silent,0,86400000,1
+DOWNTIME,fault_radio_wedge,interrupt,0,startup,29130,86400000,0
+DOWNTIME,fault_radio_wedge,interrupt,0,battery,0,86400000,0
+DOWNTIME,fault_radio_wedge,interrupt,0,no_gps,0,86400000,0
+DOWNTIME,fault_radio_wedge,interrupt,0,radio,0,86400000,0
+DOWNTIME,fault_radio_wedge,interrupt,0,reboot,0,86400000,0
+DOWNTIME,fault_radio_wedge,interrupt,0,silent,78599510,86400000,0
+DOWNTIME,fault_hang,interrupt,0,startup,29130,86400000,0
+DOWNTIME,fault_hang,interrupt,0,battery,0,86400000,0
+DOWNTIME,fault_hang,interrupt,0,no_gps,0,86400000,0
+DOWNTIME,fault_hang,interrupt,0,radio,0,86400000,0
+DOWNTIME,fault_hang,interrupt,0,reboot,0,86400000,0
+DOWNTIME,fault_hang,interrupt,0,silent,78602550,86400000,0
+DOWNTIME,fault_lost_completion,duty_cycled,6000,startup,29123,86400000,1
+DOWNTIME,fault_lost_completion,duty_cycled,6000,battery,0,86400000,1
+DOWNTIME,fault_lost_completion,duty_cycled,6000,no_gps,0,86400000,1
+DOWNTIME,fault_lost_completion,duty_cycled,6000,radio,0,86400000,1
+DOWNTIME,fault_lost_completion,duty_cycled,6000,reboot,0,86400000,1
+DOWNTIME,fault_lost_completion,duty_cycled,6000,silent,0,86400000,1
+DOWNTIME,fault_sky_blockage,duty_cycled,6000,startup,29123,86400000,1
+DOWNTIME,fault_sky_blockage,duty_cycled,6000,battery,0,86400000,1
+DOWNTIME,fault_sky_blockage,duty_cycled,6000,no_gps,6925010,86400000,1
+DOWNTIME,fault_sky_blockage,duty_cycled,6000,radio,0,86400000,1
+DOWNTIME,fault_sky_blockage,duty_cycled,6000,reboot,0,86400000,1
+DOWNTIME,fault_sky_blockage,duty_cycled,6000,silent,0,86400000,1
+DOWNTIME,fault_imu_failing,duty_cycled,6000,startup,29123,86400000,1
+DOWNTIME,fault_imu_failing,duty_cycled,6000,battery,0,86400000,1
+DOWNTIME,fault_imu_failing,duty_cycled,6000,no_gps,0,86400000,1
+DOWNTIME,fault_imu_failing,duty_cycled,6000,radio,0,86400000,1
+DOWNTIME,fault_imu_failing,duty_cycled,6000,reboot,0,86400000,1
+DOWNTIME,fault_imu_failing,duty_cycled,6000,silent,0,86400000,1
+DOWNTIME,fault_radio_wedge,duty_cycled,6000,startup,29123,86400000,1
+DOWNTIME,fault_radio_wedge,duty_cycled,6000,battery,0,86400000,1
+DOWNTIME,fault_radio_wedge,duty_cycled,6000,no_gps,0,86400000,1
+DOWNTIME,fault_radio_wedge,duty_cycled,6000,radio,600000,86400000,1
+DOWNTIME,fault_radio_wedge,duty_cycled,6000,reboot,0,86400000,1
+DOWNTIME,fault_radio_wedge,duty_cycled,6000,silent,0,86400000,1
+DOWNTIME,fault_hang,duty_cycled,6000,startup,29123,86400000,1
+DOWNTIME,fault_hang,duty_cycled,6000,battery,0,86400000,1
+DOWNTIME,fault_hang,duty_cycled,6000,no_gps,0,86400000,1
+DOWNTIME,fault_hang,duty_cycled,6000,radio,0,86400000,1
+DOWNTIME,fault_hang,duty_cycled,6000,reboot,0,86400000,1
+DOWNTIME,fault_hang,duty_cycled,6000,silent,0,86400000,1
+test/test_power_bench/test_main.cpp:132:test_experiment_2_fault_recovery:PASS
+DOWNTIME,combined_30d,interrupt,0,startup,29130,2592000000,-
+DOWNTIME,combined_30d,interrupt,0,battery,2546196470,2592000000,-
+DOWNTIME,combined_30d,interrupt,0,no_gps,0,2592000000,-
+DOWNTIME,combined_30d,interrupt,0,radio,0,2592000000,-
+DOWNTIME,combined_30d,interrupt,0,reboot,0,2592000000,-
+DOWNTIME,combined_30d,interrupt,0,silent,0,2592000000,-
+DOWNTIME,combined_30d,duty_cycled,6000,startup,29123,2592000000,-
+DOWNTIME,combined_30d,duty_cycled,6000,battery,1291405787,2592000000,-
+DOWNTIME,combined_30d,duty_cycled,6000,no_gps,6925010,2592000000,-
+DOWNTIME,combined_30d,duty_cycled,6000,radio,600000,2592000000,-
+DOWNTIME,combined_30d,duty_cycled,6000,reboot,0,2592000000,-
+DOWNTIME,combined_30d,duty_cycled,6000,silent,0,2592000000,-
+test/test_power_bench/test_main.cpp:133:test_experiment_3_combined_30_days:PASS
+
+-----------------------
+4 Tests 0 Failures 0 Ignored 
+OK
+
+------------- native:test_power_bench [PASSED] Took 18.44 seconds -------------
+
+=================================== SUMMARY ===================================
+Environment       Test               Status    Duration
+----------------  -----------------  --------  ------------
+node_polling      test_downtime      SKIPPED
+node_polling      test_polling       SKIPPED
+node_polling      test_pairing       SKIPPED
+node_polling      test_ring_buffer   SKIPPED
+node_polling      test_power_bench   SKIPPED
+node_polling      test_fakes         SKIPPED
+node_polling      test_benchmark     SKIPPED
+node_polling      test_duty_cycled   SKIPPED
+node_polling      test_mesh          SKIPPED
+node_polling      test_node_state    SKIPPED
+node_polling      test_packet        SKIPPED
+node_polling      test_nmea          SKIPPED
+node_polling      test_ubx           SKIPPED
+node_polling      test_packet_queue  SKIPPED
+node_polling      test_interrupt     SKIPPED
+node_polling      test_sample        SKIPPED
+node_interrupt    test_downtime      SKIPPED
+node_interrupt    test_polling       SKIPPED
+node_interrupt    test_pairing       SKIPPED
+node_interrupt    test_ring_buffer   SKIPPED
+node_interrupt    test_power_bench   SKIPPED
+node_interrupt    test_fakes         SKIPPED
+node_interrupt    test_benchmark     SKIPPED
+node_interrupt    test_duty_cycled   SKIPPED
+node_interrupt    test_mesh          SKIPPED
+node_interrupt    test_node_state    SKIPPED
+node_interrupt    test_packet        SKIPPED
+node_interrupt    test_nmea          SKIPPED
+node_interrupt    test_ubx           SKIPPED
+node_interrupt    test_packet_queue  SKIPPED
+node_interrupt    test_interrupt     SKIPPED
+node_interrupt    test_sample        SKIPPED
+node_duty_cycled  test_downtime      SKIPPED
+node_duty_cycled  test_polling       SKIPPED
+node_duty_cycled  test_pairing       SKIPPED
+node_duty_cycled  test_ring_buffer   SKIPPED
+node_duty_cycled  test_power_bench   SKIPPED
+node_duty_cycled  test_fakes         SKIPPED
+node_duty_cycled  test_benchmark     SKIPPED
+node_duty_cycled  test_duty_cycled   SKIPPED
+node_duty_cycled  test_mesh          SKIPPED
+node_duty_cycled  test_node_state    SKIPPED
+node_duty_cycled  test_packet        SKIPPED
+node_duty_cycled  test_nmea          SKIPPED
+node_duty_cycled  test_ubx           SKIPPED
+node_duty_cycled  test_packet_queue  SKIPPED
+node_duty_cycled  test_interrupt     SKIPPED
+node_duty_cycled  test_sample        SKIPPED
+gateway           test_downtime      SKIPPED
+gateway           test_polling       SKIPPED
+gateway           test_pairing       SKIPPED
+gateway           test_ring_buffer   SKIPPED
+gateway           test_power_bench   SKIPPED
+gateway           test_fakes         SKIPPED
+gateway           test_benchmark     SKIPPED
+gateway           test_duty_cycled   SKIPPED
+gateway           test_mesh          SKIPPED
+gateway           test_node_state    SKIPPED
+gateway           test_packet        SKIPPED
+gateway           test_nmea          SKIPPED
+gateway           test_ubx           SKIPPED
+gateway           test_packet_queue  SKIPPED
+gateway           test_interrupt     SKIPPED
+gateway           test_sample        SKIPPED
+native            test_downtime      SKIPPED
+native            test_polling       SKIPPED
+native            test_pairing       SKIPPED
+native            test_ring_buffer   SKIPPED
+native            test_power_bench   PASSED    00:00:18.444
+native            test_fakes         SKIPPED
+native            test_benchmark     SKIPPED
+native            test_duty_cycled   SKIPPED
+native            test_mesh          SKIPPED
+native            test_node_state    SKIPPED
+native            test_packet        SKIPPED
+native            test_nmea          SKIPPED
+native            test_ubx           SKIPPED
+native            test_packet_queue  SKIPPED
+native            test_interrupt     SKIPPED
+native            test_sample        SKIPPED
+================== 4 test cases: 4 succeeded in 00:00:18.444 ==================

@@ -125,7 +125,7 @@ Pairing already bounds the offset to 250 ms either way, so this path is a guard,
 
 The frame stays at 45 bytes because of airtime, not tidiness.
 With the airtime formula in [Results](#results) at SF12, BW125, CR4/8 with low-data-rate optimisation, the payload term is `ceil((8*PL - 4) / 40)` blocks of 8 symbols.
-At 45 bytes that is 9 blocks, 80 payload symbols in total; anywhere from 46 to 50 bytes it is 10 blocks, 88 symbols.
+At 45 bytes that is 9 blocks, so 9 x 8 + 8 = 80 payload symbols in total counting the formula's fixed 8; anywhere from 46 to 50 bytes it is 10 blocks, 10 x 8 + 8 = 88 symbols.
 Eight symbols at 32.768 ms each is 262 ms more airtime, and transmit energy, on every report for the life of the node.
 
 ## Gateway serial output
@@ -312,8 +312,11 @@ Each down interval is attributed to one cause:
 | `battery` | the node died; known to the simulation, not inferable at the gateway |
 | `no_gps` | `gps_valid = 0` heartbeats arrived during the interval |
 | `radio` | `tx_timeouts` is higher in the record that ends the interval |
-| `reboot` | `boot_count` is higher in the record that ends the interval |
+| `reboot` | `boot_count` differs from the one in the record that began the interval |
 | `silent` | none of the above: the node is down and nothing in-band explains why |
+
+`reboot` tests for a different `boot_count`, not a higher one, so a counter that restarts also counts (`compute_downtime()` in `lib/floodnet_core/src/downtime.cpp` compares with `!=`).
+When more than one cause applies, the first match wins, in this order: `startup`, `no_gps`, `reboot`, `radio`, then `silent`; `battery` is split off first, from the node's death onward.
 
 Two builds are compared, both on the same simulated hardware as the milestone 2 benchmark (SF12, 3023 ms airtime, the same GPS sentence and byte rate):
 
@@ -498,12 +501,13 @@ For those two rows the minutes are only the time left in the 24-hour run after t
 Three zeros need their explanation beside them, because read bare they claim more than they show:
 
 - **`duty_cycled`, lost DIO0 edge, 0 down: a boundary result.**
-  A diagnostic probe run during implementation, not part of the printed output, found the gap between the records either side of the lost report is exactly 600 000 ms, twice the 300 000 ms interval.
+  `test_dc_lost_completion_costs_exactly_one_report` in `test/test_fault_evidence/` pins that the largest gap between valid records is exactly 600 000 ms, twice the 300 000 ms interval, with exactly one `seq` missing, `tx_timeouts` reaching 1, and no reboot.
   The rule is strictly "more than 600 000 ms", so that gap is not down.
-  The zero shows that a lost completion costs this build exactly one report, which the definition tolerates; it is not evidence of fast recovery, and a gap one millisecond longer would have printed 1.
+  The zero shows that a lost completion costs this build exactly one report, which the definition tolerates; it is not evidence of fast recovery, and a gap one millisecond longer would have printed `down_ms` 1.
+  "Exactly one report" is a property of the simulation, and a pessimistic one: `FakeRadio` drops the frame when the DIO0 edge is lost, whereas on hardware the modem has already transmitted it and the gateway likely receives it.
 - **`duty_cycled`, hang, `reboot` 0: the reboot happened.**
-  The same probe saw `boot_count` go from 1 to 2, so WDOG1 did reset the node.
-  The longest gap between its records was about 390 s, which never exceeded the 600 000 ms stale window, so no time was down and no time could be attributed to `reboot`.
+  `test_dc_hang_reboots_once_without_going_stale` pins one reboot, with `boot_count` 1 in the first delivered record and 2 in the last, so WDOG1 did reset the node.
+  The same test pins the longest gap between its valid records at 390 100 ms, which never exceeded the 600 000 ms stale window, so no time was down and no time could be attributed to `reboot`.
   The zero means the reset cost no downtime, not that no reset occurred.
 - **Both builds, IMU failing, 0 down: the definition working, not resilience.**
   Fixes kept arriving with `gps_valid = 1` and `imu_valid = 0`, which the definition does not count as down.
@@ -512,15 +516,21 @@ Three zeros need their explanation beside them, because read bare they claim mor
 The nonzero rows:
 
 - **Sky blockage.** Both builds are down for most of the 2-hour blockage.
-  If reports resumed the instant the sky cleared, the definition would give 7200000 - 600000 = 6600000 ms; `interrupt` measured 6578310 and `duty_cycled` 6925010.
-  The output does not show why each lands where it does, and it has not been instrumented, so the 346700 ms difference between them is not interpreted here.
+  The reference figure 7200000 - 600000 = 6600000 ms makes two assumptions: that the last valid report arrived exactly when the blockage began, and that reports resumed the instant the sky cleared.
+  `interrupt` measured 6578310 and `duty_cycled` 6925010.
+  The first assumption does not hold for `interrupt`: its last valid record before the blockage arrived at 7224810 ms, 24.8 s after the blockage began at 7200000 ms, which is why it measured below the reference (pinned by `test_interrupt_sky_blockage_last_record_after_start`).
+  Why `duty_cycled` lands above the reference has not been instrumented, so the 346700 ms difference between the builds is not interpreted further here.
   What does differ by design is the cause: `duty_cycled` sends `gps_valid = 0` heartbeats, so the gateway sees `no_gps` and knows the node is alive; `interrupt` sends nothing, so the same outage is `silent`.
 - **Radio wedge, `duty_cycled`: 600000 ms, set by policy.**
   The radio is power-cycled after `RADIO_FAIL_LIMIT` = 3 consecutive failed transmit states.
-  Three lost reports make a gap of four intervals, 1200000 ms, of which the first 600000 ms is tolerated, which is exactly the printed figure; the diagnostic probe saw `tx_timeouts` reach 3 and one radio power cycle.
+  Three lost reports make a gap of four intervals, 1200000 ms, of which the first 600000 ms is tolerated, which is exactly the printed figure.
+  `test_dc_radio_wedge_recovers_after_three_timeouts` pins that gap at 1200000 ms, with 3 `seq` values missing, `tx_timeouts` reaching 3 and one radio power cycle.
   The figure is set by `RADIO_FAIL_LIMIT` and the report interval, so it measures the recovery policy rather than the simulation.
   It is attributed to `radio` because `tx_timeouts` is higher in the record that ends it.
-- **Lost DIO0 edge, `interrupt`: 0.** The existing 5000 ms `TX_TIMEOUT_MS` abandons the lost packet, and a build that transmits back-to-back loses seconds, far inside the stale window.
+- **Lost DIO0 edge, `interrupt`: 0.** The existing 5000 ms `TX_TIMEOUT_MS` abandons the lost packet, and a build that transmits back-to-back loses seconds, far inside the stale window: `test_interrupt_lost_completion_loses_seconds` pins its largest gap between valid records at 8050 ms.
+
+The faults were applied, not just scheduled: in the same configuration, `test/test_fault_evidence/` pins that the IMU fault gives `duty_cycled` 72 records with `imu_valid = 0` and 24 IMU power cycles, and that the sky blockage gives `duty_cycled` 24 heartbeats and `interrupt` none.
+Experiments 2 and 3 themselves fail if any scheduled fault never started while the battery still had charge.
 
 #### Experiment 3: combined 30 days
 
@@ -565,7 +575,7 @@ So `scenario_ms - battery` is whichever of those two came later.
   Its only down time other than `startup` and `battery` is `no_gps` 6925010 and `radio` 600000, identical to experiment 2's single-fault figures, so it was never stale between the day 11 recovery and its death.
   Its last valid record therefore arrived at 1300594213 - 600000 = 1299994213 ms, 15.05 days, after the day 14 hang, and it died between that and 1300594213 ms.
   The lost edge, the IMU failure and the hang again cost nothing, for the reasons given under experiment 2.
-  It died between 22707532 and 23307532 ms, about 0.26 to 0.27 days, sooner than experiment 1's 1323301745 ms; the only difference between the runs is the faults, so that is the energy they cost, and the output does not break it down by fault.
+  It died between 22707532 and 23307532 ms sooner than experiment 1's 1323301745 ms, about 0.26 to 0.27 days sooner; the only difference between the runs is the faults, so that is the energy they cost, and the output does not break it down by fault.
 
 ## Known limitations
 
@@ -641,8 +651,11 @@ It is recorded here as future work so that "did anything change after you saw th
 
 ### Milestone 3 simulation
 
-- **Currents are taken at face value.** Every current in `test/support/current_model.hpp` is a typical data sheet value drawn straight from the cell, with no regulator efficiency and no regulator quiescent current, power LED or leakage.
-  The Teensy 4.1's sleep current is not a data sheet value at all: it is a PJRC forum measurement, which is why experiment 1 is reported at two values, 6 mA and 25.86 mA.
+- **Currents are taken at face value.** Every current in `test/support/current_model.hpp` is drawn straight from the cell, with no regulator efficiency and no regulator quiescent current, power LED or leakage.
+  The peripheral currents are data sheet values: the NEO-M8 data sheet UBX-15031086, the BNO055 data sheet BST-BNO055-DS000, and Table 51 of the RFM95/96/97/98W data sheet.
+  The Teensy figures are not.
+  The 100 mA awake current is from the PJRC Teensy 4.1 product page ("approximately 100 mA" at 600 MHz, in a sentence that names the Teensy 4.0, the same MCU at the same clock).
+  The two sleep currents are PJRC forum measurements, 6 mA from the thread "Teensy 4.1 deep sleep and watchdog" and 25.86 mA from "Teensy 4.1 using Snooze library with deepSleep", which is why experiment 1 is reported at both.
   The 6 mA figure was measured from a 5 V supply (see the comment on it in `current_model.hpp`) and is charged to the cell unchanged.
 - **Snooze's `millis()` compensation is wrong on Teensy 4, and `TeensyPower` corrects it.** In the bundled Snooze 6.3.9, `src/hal/TEENSY_40/SnoozeTimer.cpp` stores `period = seconds * 32768` and, on wake, advances `systick_millis_count` by `period / 1000`: 32.768 ms per slept second instead of 1000 ms.
   Left alone, a node would believe a 60 s sleep lasted about 2 s and its 5-minute schedule would stretch about thirty-fold.
@@ -652,14 +665,17 @@ It is recorded here as future work so that "did anything change after you saw th
   The `interrupt` build never sleeps, so its faults start on the millisecond.
 - **`battery_mv` in simulation is a placeholder.** It falls in a straight line from 4200 mV at full to 3000 mV at empty.
   That is telemetry plumbing, not a discharge model, and no result above depends on it.
+- **The battery divider's own drain is not in the energy budget.** The two 100 kOhm resistors from the cell to pin 14 draw about 21 uA all the time (4.2 V / 200 kOhm), about 0.24% of the 8.705 mA `duty_cycled` average at 6 mA sleep (21 / 8705).
+- **`FakeRadio` refuses a send while the radio is unpowered.** `RH_RF95::send()` would instead wake a sleeping radio and transmit, so the fake is stricter than the driver on that path.
 - **The experiments run on every push.** CI runs `pio test -e native`, which includes `test_power_bench`.
-  In the saved experiment output `test_power_bench` took 18.44 s, and the whole native suite of 189 test cases took about 24 to 28 s across the runs recorded on the development machine; a CI runner's time will differ.
+  In the saved experiment output, committed as [docs/results/milestone-3-power-bench.txt](docs/results/milestone-3-power-bench.txt), `test_power_bench` took 18.44 s.
+  Before `test_fault_evidence` was added, the whole native suite of 189 test cases took about 24 to 28 s across the runs recorded on the development machine; that range is machine-specific and not a committed artifact, and a CI runner's time will differ.
 
 ### Recovery exists only in `node_duty_cycled`
 
 A radio that wedges on every attempt, rather than losing one completion, is now recovered, but only by `node_duty_cycled`.
 It power-cycles and re-initialises the radio after `RADIO_FAIL_LIMIT` = 3 consecutive transmit states that end with no completed transmit.
-It also runs WDOG1 with a 90 000 ms timeout, kicked on every state transition and on nothing else, so a loop that keeps spinning while stuck in one state is still reset; the 5-minute sleep is taken in 60 s chunks to stay under WDOG1's 128 s ceiling.
+It also runs WDOG1 with a 90 000 ms timeout, kicked on every state transition and on nothing else, so a loop that keeps spinning while stuck in one state is still reset; the 5-minute sleep is taken in 60 s chunks to stay under that 90 000 ms timeout, which is the binding limit rather than WDOG1's 128 s hardware ceiling.
 
 `node_polling` and `node_interrupt` have neither, and a persistently wedged radio or a hang still leaves them dead until power-cycled; experiment 2's `recovered` column shows it.
 Both still bound a single lost completion.
@@ -670,6 +686,13 @@ In `node_polling`, `TeensyRadio::transmit()` gives up after its 5000 ms `waitPac
 `node_duty_cycled` inherits that path from the sampler it wraps.
 `test/test_interrupt/` drops one completion edge and asserts the node recovers and the sequence accounting stays closed.
 
+### Gaps in `node_duty_cycled` itself
+
+- **A hang during boot is unprotected.** WDOG1 is armed only in `g_node.begin()` in `src/main.cpp`, after the drivers are initialised, so a driver that hangs during initialisation has no watchdog behind it.
+  For the I2C case, the Teensy 4 `Wire` library's own timeouts bound it.
+- **`boot_count` resets whenever SNVS loses power.** The board has no coin cell, so a battery swap clears `SNVS_LPGPR3` and the node starts again at `boot_count` 1.
+  It then reuses dedup keys `(node_id, boot_count, seq)` it has already sent, and a gateway still holding them could discard its first packets.
+
 ### Not validated on hardware
 
 No board has been available for milestones 2 or 3.
@@ -678,10 +701,12 @@ Specifically unverified:
 
 - The `IntervalTimer` IMU path and `TeensyRadio::abort_transmit()`'s `setModeIdle()` recovery, exercised only against fakes.
 - **Whether WDOG1 counts through a Snooze `deepSleep` at all.** This is the first bench test to run.
-  In the bundled Snooze 6.3.9, `hal_deepSleep()` in `src/hal/TEENSY_40/hal.c` (line 777) rewrites `CCM_CCGR3` at line 805, keeping only the ACMP1-4 clock gates and `0x10000000`.
+  In the bundled Snooze 6.3.9, `hal_deepSleep()` in `src/hal/TEENSY_40/hal.c` (line 777) sets `CCM_CLPCR_LPM(0x01)`, WAIT mode, at line 789, and rewrites `CCM_CCGR3` at line 805, keeping only the ACMP1-4 clock gates and `0x10000000`.
   That clears `CCM_CCGR3_WDOG1`, bits 17-16 per `imxrt.h`, gating WDOG1's clock until line 851 restores the register on wake.
   If WDOG1 stops counting while gated, a GPT wake that never fires would hang the node with no reset.
-  That is the failure the design meant to rule out by leaving WDOG1's low-power suspend bit, `WCR[WDZST]`, clear; the clock gate may reintroduce it by another route.
+  That is the failure the design meant to rule out by leaving both of WDOG1's low-power suspend bits clear: `WCR[WDW]` (bit 7), which suspends it in WAIT mode, the mode Snooze enters, and `WCR[WDZST]` (bit 0), which suspends it in STOP and DOZE.
+  The `WDW`-to-WAIT mapping is a reading of the RT1060 reference manual's `WDOG_WCR` description, not verified on a board.
+  The clock gate may reintroduce the failure by another route.
   This is read from source; it has not been observed on a board.
 - Snooze `deepSleep` timer wake alongside WDOG1 on current Teensyduino in general.
 - The real sleep current of this board with these peripherals attached, which experiment 1 shows sets the battery life.
