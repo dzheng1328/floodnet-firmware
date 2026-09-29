@@ -3,9 +3,13 @@
 
 #include <floodnet/nmea.hpp>
 
+#include "../support/current_model.hpp"
 #include "../support/fake_gps.hpp"
 #include "../support/fake_imu.hpp"
+#include "../support/fake_persistent_store.hpp"
+#include "../support/fake_power.hpp"
 #include "../support/fake_radio.hpp"
+#include "../support/fake_watchdog.hpp"
 #include "../support/hang_breaker.hpp"
 #include "../support/sim_clock.hpp"
 
@@ -499,6 +503,157 @@ void test_refusing_radio_refuses_begin_transmit(void) {
     TEST_ASSERT_FALSE(radio.begin_transmit(payload, 1));
 }
 
+namespace {
+
+/// Everything FakePower needs, registered with FakePower first so each tick
+/// is charged at the state that held when it began.
+struct PowerBench {
+    SimClock clock;
+    FakeGps gps;
+    FakeImu imu;
+    FakeRadio radio;
+    CurrentModel model;
+    FakePower power;
+
+    explicit PowerBench(uint64_t capacity_nA_ms)
+        : clock(),
+          gps(kFix, 0.96, FakeGps::MAX_FIFO_DEPTH),
+          imu(clock, 10),
+          radio(clock, 92),
+          model(),
+          power(clock, gps, imu, radio, model, capacity_nA_ms) {
+        clock.add_observer(&power);
+        clock.add_observer(&gps);
+        clock.add_observer(&imu);
+        clock.add_observer(&radio);
+    }
+
+    void all_low() {
+        power.set_power(Peripheral::Gps, PowerState::Low);
+        power.set_power(Peripheral::Imu, PowerState::Low);
+        power.set_power(Peripheral::Radio, PowerState::Low);
+    }
+};
+
+// 6 mA + 30 uA + 40 uA + 0.2 uA, in nA.
+const uint64_t kAllLowSleepingNa = 6000000ULL + 30000ULL + 40000ULL + 200ULL;
+
+}  // namespace
+
+void test_awake_with_everything_on_draws_the_table_sum(void) {
+    PowerBench b(0);
+    // Teensy awake + GPS tracking + BNO055 normal + RFM95W standby.
+    TEST_ASSERT_EQUAL_UINT64(100000000ULL + 23000000ULL + 12300000ULL + 1600000ULL,
+                             b.power.current_nA());
+}
+
+void test_transmitting_replaces_standby_with_transmit_current(void) {
+    PowerBench b(0);
+    const uint8_t payload[] = {1};
+    b.radio.begin_transmit(payload, 1);
+    TEST_ASSERT_EQUAL_UINT64(100000000ULL + 23000000ULL + 12300000ULL + 120000000ULL,
+                             b.power.current_nA());
+}
+
+void test_acquiring_gps_draws_acquisition_current(void) {
+    PowerBench b(0);
+    b.gps.set_powered(false);
+    b.gps.set_powered(true);
+    TEST_ASSERT_EQUAL_UINT64(100000000ULL + 25000000ULL + 12300000ULL + 1600000ULL,
+                             b.power.current_nA());
+}
+
+void test_sleep_charges_sleep_currents_for_the_whole_jump(void) {
+    PowerBench b(0);
+    b.all_low();
+    b.power.sleep_until(60000);
+    TEST_ASSERT_EQUAL_UINT32(60000, b.clock.now_ms());
+    TEST_ASSERT_EQUAL_UINT64(kAllLowSleepingNa * 60000ULL, b.power.consumed_nA_ms());
+    TEST_ASSERT_FALSE(b.power.sleeping());
+    TEST_ASSERT_EQUAL_UINT(1, b.power.sleeps());
+}
+
+void test_sleep_until_the_past_returns_at_once(void) {
+    PowerBench b(0);
+    b.clock.delay_ms(100);
+    b.power.sleep_until(50);
+    TEST_ASSERT_EQUAL_UINT32(100, b.clock.now_ms());
+    TEST_ASSERT_EQUAL_UINT(0, b.power.sleeps());
+}
+
+void test_depletion_time_is_exact_inside_a_long_tick(void) {
+    PowerBench b(kAllLowSleepingNa * 30000ULL);
+    b.all_low();
+    b.power.sleep_until(60000);
+    TEST_ASSERT_TRUE(b.power.depleted());
+    TEST_ASSERT_EQUAL_UINT32(30000, b.power.depleted_at_ms());  // not 60000
+}
+
+void test_battery_mv_falls_linearly_as_a_placeholder(void) {
+    PowerBench b(kAllLowSleepingNa * 120000ULL);
+    TEST_ASSERT_EQUAL_UINT16(4200, b.power.battery_mv());
+    b.all_low();
+    b.power.sleep_until(60000);
+    TEST_ASSERT_EQUAL_UINT16(3600, b.power.battery_mv());
+}
+
+void test_unlimited_battery_never_depletes(void) {
+    PowerBench b(0);
+    b.clock.delay_ms(1000000);
+    TEST_ASSERT_FALSE(b.power.depleted());
+    TEST_ASSERT_EQUAL_UINT16(4200, b.power.battery_mv());
+}
+
+void test_power_cycle_radio_clears_a_wedge(void) {
+    PowerBench b(0);
+    b.radio.set_wedged(true);
+    const uint8_t payload[] = {1};
+    b.radio.begin_transmit(payload, 1);
+    TEST_ASSERT_TRUE(b.power.power_cycle(Peripheral::Radio));
+    TEST_ASSERT_FALSE(b.radio.tx_busy());
+    TEST_ASSERT_EQUAL_UINT(1, b.radio.power_cycles());
+}
+
+void test_watchdog_expires_only_after_its_timeout(void) {
+    SimClock clock;
+    FakeWatchdog wd;
+    clock.add_observer(&wd);
+    wd.begin(90000);
+    clock.delay_ms(90000);
+    TEST_ASSERT_FALSE(wd.expired());
+    clock.delay_ms(1);
+    TEST_ASSERT_TRUE(wd.expired());
+    TEST_ASSERT_TRUE(wd.should_break());
+    // Latched: on hardware the reset has already happened, so a kick from
+    // code still running in the simulation cannot undo it.
+    wd.kick();
+    TEST_ASSERT_TRUE(wd.expired());
+    TEST_ASSERT_EQUAL_UINT32(90001, wd.max_since_kick_ms());
+    wd.on_mcu_reset();
+    TEST_ASSERT_FALSE(wd.expired());
+}
+
+void test_unarmed_watchdog_never_expires(void) {
+    SimClock clock;
+    FakeWatchdog wd;
+    clock.add_observer(&wd);
+    clock.delay_ms(1000000);
+    TEST_ASSERT_FALSE(wd.expired());
+
+    wd.begin(1000);
+    clock.delay_ms(2000);
+    wd.on_mcu_reset();  // a reset leaves WDOG1 disabled until begin()
+    TEST_ASSERT_FALSE(wd.expired());
+}
+
+void test_persistent_store_keeps_values_and_bounds_slots(void) {
+    FakePersistentStore store;
+    store.write_u32(0, 41);
+    store.write_u32(PERSISTENT_SLOTS, 99);  // out of range: ignored
+    TEST_ASSERT_EQUAL_UINT32(41, store.read_u32(0));
+    TEST_ASSERT_EQUAL_UINT32(0, store.read_u32(PERSISTENT_SLOTS));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_clock_advances_on_delay);
@@ -538,5 +693,17 @@ int main(int, char **) {
     RUN_TEST(test_powering_radio_down_abandons_a_transmission);
     RUN_TEST(test_wedged_radio_never_completes_until_power_cycled);
     RUN_TEST(test_refusing_radio_refuses_begin_transmit);
+    RUN_TEST(test_awake_with_everything_on_draws_the_table_sum);
+    RUN_TEST(test_transmitting_replaces_standby_with_transmit_current);
+    RUN_TEST(test_acquiring_gps_draws_acquisition_current);
+    RUN_TEST(test_sleep_charges_sleep_currents_for_the_whole_jump);
+    RUN_TEST(test_sleep_until_the_past_returns_at_once);
+    RUN_TEST(test_depletion_time_is_exact_inside_a_long_tick);
+    RUN_TEST(test_battery_mv_falls_linearly_as_a_placeholder);
+    RUN_TEST(test_unlimited_battery_never_depletes);
+    RUN_TEST(test_power_cycle_radio_clears_a_wedge);
+    RUN_TEST(test_watchdog_expires_only_after_its_timeout);
+    RUN_TEST(test_unarmed_watchdog_never_expires);
+    RUN_TEST(test_persistent_store_keeps_values_and_bounds_slots);
     return UNITY_END();
 }
