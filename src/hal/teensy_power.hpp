@@ -86,7 +86,13 @@ class TeensyPower : public IPower {
             // systick_millis_count: 32.768 ms per slept second instead of
             // 1000. Add the rest, or the schedule stretches about thirty-fold.
             // Read from the library source; not observed on a board.
-            systick_millis_count += whole_s * 1000 - (whole_s * 32768) / 1000;
+            // The += is a read-modify-write of a counter the SysTick ISR
+            // also increments, so a tick landing between the load and the
+            // store would be lost: mask interrupts around it.
+            const uint32_t correction = whole_s * 1000 - (whole_s * 32768) / 1000;
+            __disable_irq();
+            systick_millis_count += correction;
+            __enable_irq();
         }
 
         // The sub-second remainder, and any early wake, on the ordinary tick.
