@@ -106,6 +106,10 @@ void test_null_control_shows_no_downtime_after_the_first_report(void) {
         // the harness producing the number, not the firmware.
         TEST_ASSERT_EQUAL_UINT32(report.down_ms[static_cast<size_t>(DownCause::Startup)],
                                  report.total_down_ms);
+        // Startup absorbs everything before the first valid record, so the
+        // check above alone passes a harness that delivers nothing. Ending
+        // fresh needs at least one valid record to have arrived.
+        TEST_ASSERT_FALSE_MESSAGE(report.down_at_end, "null control ended down");
     }
 }
 
