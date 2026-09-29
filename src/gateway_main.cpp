@@ -56,7 +56,15 @@ void print_record(const floodnet::Packet &p, int16_t rssi) {
     Serial.print(',');
     Serial.print(p.record.gps.valid ? 1 : 0);
     Serial.print(',');
-    Serial.println(p.record.imu.valid ? 1 : 0);
+    Serial.print(p.record.imu.valid ? 1 : 0);
+    // Appended, not inserted, so consumers of the existing fields are
+    // unaffected. v0x01 packets decode these as 0.
+    Serial.print(',');
+    Serial.print(p.boot_count);
+    Serial.print(',');
+    Serial.print(p.tx_timeouts);
+    Serial.print(',');
+    Serial.println(p.battery_mv);
 }
 
 }  // namespace
@@ -96,7 +104,7 @@ void loop() {
         return;
     }
 
-    if (g_dedup.seen(packet.node_id, packet.seq)) {
+    if (g_dedup.seen(packet.node_id, packet.boot_count, packet.seq)) {
         return;
     }
 
