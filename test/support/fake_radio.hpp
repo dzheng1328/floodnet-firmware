@@ -19,7 +19,11 @@ class FakeRadio : public IAsyncRadio, public ISimTick {
           last_length_(0),
           busy_(false),
           remaining_ms_(0),
-          lose_next_completion_(false) {
+          lose_next_completion_(false),
+          powered_(true),
+          wedged_(false),
+          refusing_(false),
+          power_cycles_(0) {
         memset(last_payload_, 0, sizeof(last_payload_));
     }
 
@@ -35,6 +39,9 @@ class FakeRadio : public IAsyncRadio, public ISimTick {
         // PollingSampler::step() in src/sampler_polling.cpp), so a refusal shows up as an
         // uncounted packet rather than a corrupted measurement. It also
         // matches begin_transmit(), which refuses-when-busy the same way.
+        if (!powered_) {
+            return false;
+        }
         if (busy_) {
             return false;
         }
@@ -51,13 +58,14 @@ class FakeRadio : public IAsyncRadio, public ISimTick {
     int receive(uint8_t *, size_t) override { return -1; }
 
     bool begin_transmit(const uint8_t *data, size_t len) override {
-        if (busy_ || len > sizeof(last_payload_)) {
+        if (!powered_ || refusing_ || busy_ || len > sizeof(last_payload_)) {
             return false;
         }
         memcpy(last_payload_, data, len);
         last_length_ = len;
         busy_ = true;
-        remaining_ms_ = tx_cost_ms_;
+        // Wedged: accepted, sent to the modem, never reported finished.
+        remaining_ms_ = wedged_ ? UINT32_MAX : tx_cost_ms_;
         return true;
     }
 
@@ -72,6 +80,37 @@ class FakeRadio : public IAsyncRadio, public ISimTick {
     /// radio never reports it finished, so tx_busy() stays true until
     /// abort_transmit(). One-shot, so a sampler that recovers can be seen to.
     void lose_next_completion() { lose_next_completion_ = true; }
+
+    /// Off models RH_RF95::sleep(): a transmission in progress is abandoned.
+    void set_powered(bool on) {
+        powered_ = on;
+        if (!on) {
+            busy_ = false;
+            remaining_ms_ = 0;
+        }
+    }
+
+    bool powered() const { return powered_; }
+
+    /// Every transmission from now on hangs, until power_cycle().
+    void set_wedged(bool wedged) { wedged_ = wedged; }
+
+    /// begin_transmit() refuses outright while set.
+    void set_refusing(bool refusing) { refusing_ = refusing; }
+
+    /// Models a reset-pin pulse and re-init: clears a wedge, leaves it on.
+    void power_cycle() {
+        busy_ = false;
+        remaining_ms_ = 0;
+        wedged_ = false;
+        powered_ = true;
+        ++power_cycles_;
+    }
+
+    size_t power_cycles() const { return power_cycles_; }
+
+    /// Const view of tx_busy() for energy accounting.
+    bool transmitting() const { return busy_; }
 
     void on_tick(uint32_t elapsed_ms) override {
         if (!busy_ || remaining_ms_ == UINT32_MAX) {
@@ -116,6 +155,10 @@ class FakeRadio : public IAsyncRadio, public ISimTick {
     bool busy_;
     uint32_t remaining_ms_;
     bool lose_next_completion_;
+    bool powered_;
+    bool wedged_;
+    bool refusing_;
+    size_t power_cycles_;
 };
 
 }  // namespace floodnet

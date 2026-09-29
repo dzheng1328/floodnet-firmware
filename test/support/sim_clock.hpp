@@ -62,6 +62,17 @@ class SimClock : public IClock {
         }
     }
 
+    /// Moves straight to `t_ms` in one on_tick. Used for sleep, where 1 ms
+    /// steps would make a 30-day run take billions of iterations. An observer
+    /// that is powered down ignores the elapsed time; one that is not sees a
+    /// single large tick. Does nothing if `t_ms` is not in the future.
+    void advance_to(uint32_t t_ms) {
+        const int32_t ahead = static_cast<int32_t>(t_ms - now_ms_);
+        if (ahead > 0) {
+            delay_ms(static_cast<uint32_t>(ahead));
+        }
+    }
+
     bool any_pending() const {
         for (size_t i = 0; i < observer_count_; ++i) {
             if (observers_[i]->pending()) {
@@ -72,7 +83,7 @@ class SimClock : public IClock {
     }
 
   private:
-    static const size_t MAX_OBSERVERS = 4;
+    static const size_t MAX_OBSERVERS = 8;
     uint32_t now_ms_;
     ISimTick *observers_[MAX_OBSERVERS];
     size_t observer_count_;

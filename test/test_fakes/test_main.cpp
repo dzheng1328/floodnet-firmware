@@ -1,9 +1,12 @@
 #include <string.h>
 #include <unity.h>
 
+#include <floodnet/nmea.hpp>
+
 #include "../support/fake_gps.hpp"
 #include "../support/fake_imu.hpp"
 #include "../support/fake_radio.hpp"
+#include "../support/hang_breaker.hpp"
 #include "../support/sim_clock.hpp"
 
 using namespace floodnet;
@@ -254,6 +257,248 @@ void test_blocking_transmit_is_refused_while_an_async_transmit_is_in_flight(void
     TEST_ASSERT_EQUAL_UINT(3, radio.last_length());
 }
 
+namespace {
+
+struct CountingTick : public ISimTick {
+    size_t calls = 0;
+    uint32_t total_ms = 0;
+    void on_tick(uint32_t elapsed_ms) override {
+        ++calls;
+        total_ms += elapsed_ms;
+    }
+    bool pending() const override { return false; }
+};
+
+struct AtTime : public IHangBreaker {
+    SimClock &clock;
+    uint32_t at_ms;
+    AtTime(SimClock &c, uint32_t t) : clock(c), at_ms(t) {}
+    bool should_break() const override { return clock.now_ms() >= at_ms; }
+};
+
+const char kFix[] = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47\r\n";
+
+/// Advances 1 ms at a time, parsing what the GPS emits, and returns the time
+/// the first valid fix completes, or UINT32_MAX if none by `limit_ms`.
+uint32_t first_valid_fix_ms(SimClock &clock, FakeGps &gps, uint32_t limit_ms) {
+    NmeaLineAssembler line;
+    while (clock.now_ms() < limit_ms) {
+        clock.delay_ms(1);
+        for (int b = gps.read_byte(); b >= 0; b = gps.read_byte()) {
+            if (!line.feed(static_cast<char>(b))) {
+                continue;
+            }
+            GpsFix fix;
+            if (parse_gga(line.sentence(), line.length(), clock.now_ms(), &fix) && fix.valid) {
+                return clock.now_ms();
+            }
+        }
+    }
+    return UINT32_MAX;
+}
+
+}  // namespace
+
+void test_advance_to_delivers_one_tick(void) {
+    SimClock clock;
+    CountingTick tick;
+    clock.add_observer(&tick);
+    clock.advance_to(5000);
+    TEST_ASSERT_EQUAL_UINT(1, tick.calls);
+    TEST_ASSERT_EQUAL_UINT32(5000, tick.total_ms);
+    TEST_ASSERT_EQUAL_UINT32(5000, clock.now_ms());
+
+    clock.advance_to(4000);  // already past: nothing happens
+    TEST_ASSERT_EQUAL_UINT(1, tick.calls);
+    TEST_ASSERT_EQUAL_UINT32(5000, clock.now_ms());
+}
+
+void test_clock_accepts_eight_observers(void) {
+    SimClock clock;
+    CountingTick ticks[8];
+    for (size_t i = 0; i < 8; ++i) {
+        clock.add_observer(&ticks[i]);
+    }
+    clock.delay_ms(1);
+    TEST_ASSERT_EQUAL_UINT(1, ticks[7].calls);
+}
+
+void test_default_gps_still_fixes_immediately(void) {
+    SimClock clock;
+    FakeGps gps(kFix, 0.96, FakeGps::MAX_FIFO_DEPTH);
+    clock.add_observer(&gps);
+    TEST_ASSERT_FALSE(gps.acquiring());
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(72, first_valid_fix_ms(clock, gps, 1000));
+}
+
+void test_unpowered_gps_emits_nothing(void) {
+    SimClock clock;
+    FakeGps gps(kFix, 0.96, FakeGps::MAX_FIFO_DEPTH);
+    clock.add_observer(&gps);
+    gps.set_powered(false);
+    clock.delay_ms(1000);
+    TEST_ASSERT_EQUAL_INT(-1, gps.read_byte());
+    TEST_ASSERT_FALSE(gps.pending());
+}
+
+void test_gps_cold_start_sends_no_fix_until_ttff(void) {
+    SimClock clock;
+    FakeGps gps(kFix, 0.96, FakeGps::MAX_FIFO_DEPTH);
+    clock.add_observer(&gps);
+    gps.set_powered(false);
+    gps.set_powered(true);  // never had a fix: cold
+    TEST_ASSERT_TRUE(gps.acquiring());
+
+    const uint32_t first = first_valid_fix_ms(clock, gps, 40000);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(FakeGps::COLD_START_MS, first);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(FakeGps::COLD_START_MS + 120, first);
+    TEST_ASSERT_FALSE(gps.acquiring());
+}
+
+void test_gps_hot_start_after_a_short_backup(void) {
+    SimClock clock;
+    FakeGps gps(kFix, 0.96, FakeGps::MAX_FIFO_DEPTH);
+    clock.add_observer(&gps);
+    first_valid_fix_ms(clock, gps, 1000);  // has a fix
+    gps.set_powered(false);
+    clock.delay_ms(300000);
+    while (gps.read_byte() >= 0) {
+    }
+    gps.set_powered(true);
+    const uint32_t start = clock.now_ms();
+
+    const uint32_t first = first_valid_fix_ms(clock, gps, start + 40000);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(start + FakeGps::HOT_START_MS, first);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(start + FakeGps::HOT_START_MS + 120, first);
+}
+
+void test_gps_cold_start_after_ephemeris_expires(void) {
+    SimClock clock;
+    FakeGps gps(kFix, 0.96, FakeGps::MAX_FIFO_DEPTH);
+    clock.add_observer(&gps);
+    first_valid_fix_ms(clock, gps, 1000);
+    gps.set_powered(false);
+    clock.delay_ms(FakeGps::EPHEMERIS_LIFETIME_MS);
+    gps.set_powered(true);
+    const uint32_t start = clock.now_ms();
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(start + FakeGps::COLD_START_MS,
+                                        first_valid_fix_ms(clock, gps, start + 40000));
+}
+
+void test_sky_blocked_gps_never_fixes(void) {
+    SimClock clock;
+    FakeGps gps(kFix, 0.96, FakeGps::MAX_FIFO_DEPTH);
+    clock.add_observer(&gps);
+    gps.set_sky_blocked(true);
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, first_valid_fix_ms(clock, gps, 60000));
+    TEST_ASSERT_TRUE(gps.acquiring());
+}
+
+void test_injected_bytes_are_readable_while_unpowered(void) {
+    SimClock clock;
+    FakeGps gps(kFix, 0.96, FakeGps::MAX_FIFO_DEPTH);
+    gps.set_powered(false);
+    gps.inject("$AB");
+    TEST_ASSERT_EQUAL_INT('$', gps.read_byte());
+    TEST_ASSERT_EQUAL_INT('A', gps.read_byte());
+}
+
+void test_unpowered_imu_is_never_ready(void) {
+    SimClock clock;
+    FakeImu imu(clock, 10);
+    clock.add_observer(&imu);
+    imu.set_powered(false);
+    clock.delay_ms(100);
+    TEST_ASSERT_FALSE(imu.data_ready());
+    ImuSample s;
+    TEST_ASSERT_FALSE(imu.read(&s));
+}
+
+void test_powering_imu_on_primes_a_sample(void) {
+    SimClock clock;
+    FakeImu imu(clock, 10);
+    imu.set_powered(false);
+    imu.set_powered(true);
+    TEST_ASSERT_TRUE(imu.data_ready());
+}
+
+void test_failing_imu_read_returns_false(void) {
+    SimClock clock;
+    FakeImu imu(clock, 10);
+    imu.set_failing(true);
+    ImuSample s;
+    TEST_ASSERT_FALSE(imu.read(&s));
+    TEST_ASSERT_EQUAL_UINT32(10, clock.now_ms());  // a failed transaction still costs time
+}
+
+void test_hung_imu_read_returns_when_the_breaker_trips(void) {
+    SimClock clock;
+    FakeImu imu(clock, 10);
+    AtTime breaker(clock, 90050);
+    imu.hang_next_read(&breaker);
+    ImuSample s;
+    TEST_ASSERT_FALSE(imu.read(&s));
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(90050, clock.now_ms());
+    TEST_ASSERT_LESS_THAN_UINT32(90050 + FakeImu::HANG_STEP_MS, clock.now_ms());
+
+    TEST_ASSERT_TRUE(imu.read(&s));  // one-shot
+}
+
+void test_imu_power_cycle_is_counted(void) {
+    SimClock clock;
+    FakeImu imu(clock, 10);
+    imu.power_cycle();
+    TEST_ASSERT_EQUAL_UINT(1, imu.power_cycles());
+    TEST_ASSERT_TRUE(imu.powered());
+}
+
+void test_unpowered_radio_refuses(void) {
+    SimClock clock;
+    FakeRadio radio(clock, 92);
+    radio.set_powered(false);
+    const uint8_t payload[] = {1};
+    TEST_ASSERT_FALSE(radio.begin_transmit(payload, 1));
+    TEST_ASSERT_FALSE(radio.transmit(payload, 1));
+}
+
+void test_powering_radio_down_abandons_a_transmission(void) {
+    SimClock clock;
+    FakeRadio radio(clock, 92);
+    clock.add_observer(&radio);
+    const uint8_t payload[] = {1};
+    TEST_ASSERT_TRUE(radio.begin_transmit(payload, 1));
+    radio.set_powered(false);
+    TEST_ASSERT_FALSE(radio.transmitting());
+    clock.delay_ms(200);
+    TEST_ASSERT_EQUAL_UINT(0, radio.sent_count());
+}
+
+void test_wedged_radio_never_completes_until_power_cycled(void) {
+    SimClock clock;
+    FakeRadio radio(clock, 92);
+    clock.add_observer(&radio);
+    radio.set_wedged(true);
+    const uint8_t payload[] = {1};
+    TEST_ASSERT_TRUE(radio.begin_transmit(payload, 1));
+    clock.delay_ms(10000);
+    TEST_ASSERT_TRUE(radio.tx_busy());
+
+    radio.power_cycle();
+    TEST_ASSERT_EQUAL_UINT(1, radio.power_cycles());
+    TEST_ASSERT_FALSE(radio.tx_busy());
+    TEST_ASSERT_TRUE(radio.begin_transmit(payload, 1));
+    clock.delay_ms(92);
+    TEST_ASSERT_EQUAL_UINT(1, radio.sent_count());
+}
+
+void test_refusing_radio_refuses_begin_transmit(void) {
+    SimClock clock;
+    FakeRadio radio(clock, 92);
+    radio.set_refusing(true);
+    const uint8_t payload[] = {1};
+    TEST_ASSERT_FALSE(radio.begin_transmit(payload, 1));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_clock_advances_on_delay);
@@ -275,5 +520,23 @@ int main(int, char **) {
     RUN_TEST(test_async_transmit_is_refused_while_one_is_in_flight);
     RUN_TEST(test_blocking_transmit_still_works_unchanged);
     RUN_TEST(test_blocking_transmit_is_refused_while_an_async_transmit_is_in_flight);
+    RUN_TEST(test_advance_to_delivers_one_tick);
+    RUN_TEST(test_clock_accepts_eight_observers);
+    RUN_TEST(test_default_gps_still_fixes_immediately);
+    RUN_TEST(test_unpowered_gps_emits_nothing);
+    RUN_TEST(test_gps_cold_start_sends_no_fix_until_ttff);
+    RUN_TEST(test_gps_hot_start_after_a_short_backup);
+    RUN_TEST(test_gps_cold_start_after_ephemeris_expires);
+    RUN_TEST(test_sky_blocked_gps_never_fixes);
+    RUN_TEST(test_injected_bytes_are_readable_while_unpowered);
+    RUN_TEST(test_unpowered_imu_is_never_ready);
+    RUN_TEST(test_powering_imu_on_primes_a_sample);
+    RUN_TEST(test_failing_imu_read_returns_false);
+    RUN_TEST(test_hung_imu_read_returns_when_the_breaker_trips);
+    RUN_TEST(test_imu_power_cycle_is_counted);
+    RUN_TEST(test_unpowered_radio_refuses);
+    RUN_TEST(test_powering_radio_down_abandons_a_transmission);
+    RUN_TEST(test_wedged_radio_never_completes_until_power_cycled);
+    RUN_TEST(test_refusing_radio_refuses_begin_transmit);
     return UNITY_END();
 }
