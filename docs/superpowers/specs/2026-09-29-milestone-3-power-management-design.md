@@ -1,7 +1,7 @@
 # FloodNet Milestone 3: Power Management and Fault Recovery
 
 Date: 2026-09-29
-Status: approved design, pending implementation plan
+Status: implemented
 Parent spec: `docs/superpowers/specs/2026-09-20-floodnet-firmware-design.md`
 
 ## Purpose
@@ -318,7 +318,8 @@ Datasheet currents are typical values, and a real board adds regulator quiescent
 ## Revisions made while planning
 
 Recorded here because the design above was approved before these were found.
-All were made before any measurement code existed, and none changes the frozen scenario.
+All were made before any measurement code existed except the last three, which say when they were made in their own entries.
+None changes the frozen scenario.
 
 - **`InterruptSampler` is extended, not left untouched.** See "Application". The guarantee for milestone 2's figures moves from "by construction" to "by default arguments, confirmed by a bit-identical benchmark rerun".
 - **`IPower::power_cycle()`.** Re-initialising a driver after power-cycling it is driver-specific, so it belongs behind the interface rather than in `DutyCycledNode`.
@@ -335,6 +336,19 @@ All were made before any measurement code existed, and none changes the frozen s
 - **Battery sense.** `battery_mv` needs a divider the bill of materials did not have: two 100 kΩ resistors from the cell to Teensy pin 14 (A0).
   In simulation, `battery_mv` falls linearly from 4200 mV at full to 3000 mV at empty.
   That line is a telemetry placeholder, not a discharge model, and no reported result depends on it.
+- **Cause `startup`.** The definition counts a node as down until its first valid record; `startup` names that interval so it is not reported as `silent`.
+- **`LIFE` lines.** Experiment 1 reports a lifetime, printed as `LIFE,build,sleep_current_ua,died_at_ms,days`, rather than forcing it into the `DOWNTIME` shape.
+- **`FakeGps` fix detection.** The fake marks a fix as observed when the `\r` that ends the fix sentence is emitted, not on the wrap back to byte 0.
+  `NmeaLineAssembler` completes a sentence on that `\r`, so the plan's literal condition left the fake in cold start forever whenever the node cut GPS power the instant it saw a fix.
+  Made during implementation, before any measurement code ran.
+- **Experiments 2 and 3 assert completion only.** Each run asserts that it reached its end time or a depleted battery, and nothing about a measured value.
+  A test that asserts nothing is a defect, and asserting on a measured value would be tuning.
+  Made while writing the experiment code, before its first run.
+- **Null control also asserts the run ended fresh.** It checks `down_at_end` is false as well as all downtime being `startup`.
+  Without it, a harness that never delivers a valid record passes vacuously, because every interval before the first valid record is attributed to `startup`.
+  Added after review of the experiment code; the rerun that verified it printed every `LIFE` and `DOWNTIME` line byte-identical to the first run, so no measured value changed.
+- **Benchmark identity check compares the first 12 `BENCH` lines.** `pio test -v` echoes 4 of the existing rows a second time, so an unfiltered diff reports 4 lines even on an untouched tree.
+  Made during implementation; it changes how the check reads the output, not what the benchmark measures.
 
 ## Out of scope
 
