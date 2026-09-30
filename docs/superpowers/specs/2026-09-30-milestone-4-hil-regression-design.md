@@ -1,7 +1,7 @@
 # FloodNet Milestone 4: Link Regression and Signal-Integrity Tool
 
 Date: 2026-09-30
-Status: approved
+Status: implemented
 Parent spec: `docs/superpowers/specs/2026-09-20-floodnet-firmware-design.md`
 Previous milestone: `docs/superpowers/specs/2026-09-29-milestone-3-power-management-design.md`
 
@@ -192,4 +192,8 @@ The README says so.
 
 ## Revisions
 
-None yet.
+Both were made during implementation, before the one kept run of `test_hil`, and neither changes a sweep point, sample size, seed or pass criterion.
+
+- **2026-09-30: one extra channel test at *p* = 0.5.** An off-by-one in the geometric gap, used as a deliberate-break check, passed every planned channel test, because at *p* = 1e-3 it moves the flip rate by about 0.1%, inside three standard deviations.
+  `test_every_bit_position_flips_at_rate_p` checks the flip rate of each bit position at *p* = 0.5, where that off-by-one or a wrong bit mask moves the rate far outside the band.
+- **2026-09-30: plain comparisons instead of Unity's double assertions.** This build of Unity has double precision disabled, so `TEST_ASSERT_EQUAL_DOUBLE` fails on every call; the same checks are written as `TEST_ASSERT_TRUE` comparisons.
