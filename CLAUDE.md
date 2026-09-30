@@ -15,3 +15,7 @@ Mistakes already made on this project, recorded so they are not repeated.
 - A harness assertion that cannot fail is not a check.
   Demonstrate that each new one fails on a deliberately broken local edit, then revert the edit.
 - Nothing measured is tuned after it is seen.
+- Unit conversions of raw sensor values belong in `lib/floodnet_core`, not in a `src/hal/` driver, where no host test can reach them.
+  `TeensyImu::read()` cast a 0 to 360 degree heading straight to an int16 centidegree field and swapped pitch and roll, and neither showed because the driver is never host-tested.
+- Check a vendor library's field order in its source, not by the field's name.
+  `Adafruit_BNO055::getEvent` fills `orientation.y` from the roll register and `.z` from pitch.
