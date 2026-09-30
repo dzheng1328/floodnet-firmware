@@ -68,6 +68,8 @@ The gateway dispatches on the version byte and decodes both; any other version i
 Both carry a node identifier, a sequence number, a TTL, a GPS fix, an IMU sample, and the node's drop counter.
 That counter travels in-band deliberately: a receiver can see loss at the source rather than inferring it from gaps.
 
+The three orientation angles are wrapped into [-180, 180) degrees, so a heading of 350 degrees arrives as -1000 cd; see [docs/hardware.md](docs/hardware.md), "IMU orientation fields", which also records that records sent before that fix carry pitch and roll swapped.
+
 The byte layouts below are read directly from `encode_packet()` and `encode_packet_v2()` in `lib/floodnet_core/src/packet.cpp`, which are the only authoritative description of them.
 `test/test_packet/test_main.cpp` pins each with a golden-vector test, `test_golden_vector_pins_byte_layout` for v0x01 and `test_v2_golden_vector_pins_byte_layout` for v0x02, that encodes a fully specified packet and asserts the exact 45 bytes.
 If either test ever fails, the matching table is wrong and needs to be regenerated from the code, not the other way around.
@@ -91,9 +93,9 @@ A second counter reserved for CRC errors travels alongside the drop counter but 
 | 26 | 1 | gps.satellites | uint8 |
 | 27 | 1 | gps.valid | 0 or 1 |
 | 28 | 4 | imu.time_ms | uint32 |
-| 32 | 2 | imu.yaw_cd | int16, centidegrees |
-| 34 | 2 | imu.pitch_cd | int16, centidegrees |
-| 36 | 2 | imu.roll_cd | int16, centidegrees |
+| 32 | 2 | imu.yaw_cd | int16, centidegrees, -18000 to 17999 |
+| 34 | 2 | imu.pitch_cd | int16, centidegrees, -18000 to 17999 |
+| 36 | 2 | imu.roll_cd | int16, centidegrees, -18000 to 17999 |
 | 38 | 1 | imu.valid | 0 or 1 |
 | 39 | 2 | diag.drops | uint16 |
 | 41 | 2 | diag.crc_errors | uint16, reserved, always 0 |
@@ -119,9 +121,9 @@ It funds their 6 bytes from fields that carried nothing, so the frame stays at 4
 | 22 | 4 | gps.alt_mm | int32, millimetres above mean sea level |
 | 26 | 1 | gps.satellites | uint8 |
 | 27 | 2 | imu_skew_ms | int16, `imu.time_ms - gps.time_ms`; 0 when `imu_valid` is 0 |
-| 29 | 2 | imu.yaw_cd | int16, centidegrees; 0 when `imu_valid` is 0 |
-| 31 | 2 | imu.pitch_cd | int16, centidegrees; 0 when `imu_valid` is 0 |
-| 33 | 2 | imu.roll_cd | int16, centidegrees; 0 when `imu_valid` is 0 |
+| 29 | 2 | imu.yaw_cd | int16, centidegrees, -18000 to 17999; 0 when `imu_valid` is 0 |
+| 31 | 2 | imu.pitch_cd | int16, centidegrees, -18000 to 17999; 0 when `imu_valid` is 0 |
+| 33 | 2 | imu.roll_cd | int16, centidegrees, -18000 to 17999; 0 when `imu_valid` is 0 |
 | 35 | 2 | diag.drops | uint16 |
 | 37 | 2 | boot_count | uint16, incremented at every boot, saturating at 0xFFFF |
 | 39 | 2 | tx_timeouts | uint16, saturating at 0xFFFF |
@@ -960,6 +962,7 @@ Every figure here is from the host simulation, and the firmware is compiled but 
 Specifically unverified:
 
 - The `IntervalTimer` IMU path and `TeensyRadio::abort_transmit()`'s `setModeIdle()` recovery, exercised only against fakes.
+- The BNO055 Euler register order and reset orientation mode that `bno055_euler_to_sample()` relies on, read from the Adafruit library source and the data sheet.
 - **Whether WDOG1 counts through a Snooze `deepSleep` at all.** This is the first bench test to run.
   In the bundled Snooze 6.3.9, `hal_deepSleep()` in `src/hal/TEENSY_40/hal.c` (line 777) sets `CCM_CLPCR_LPM(0x01)`, WAIT mode, at line 789, and rewrites `CCM_CCGR3` at line 805, keeping only the ACMP1-4 clock gates and `0x10000000`.
   That clears `CCM_CCGR3_WDOG1`, bits 17-16 per `imxrt.h`, gating WDOG1's clock until line 851 restores the register on wake.

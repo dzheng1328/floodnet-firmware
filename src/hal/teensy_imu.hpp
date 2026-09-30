@@ -6,6 +6,7 @@
 #include <Wire.h>
 
 #include <floodnet/hal/imu.hpp>
+#include <floodnet/orientation.hpp>
 
 namespace floodnet {
 
@@ -64,10 +65,13 @@ class TeensyImu : public IImuSource {
         sensors_event_t event;
         sensor_.getEvent(&event, Adafruit_BNO055::VECTOR_EULER);
 
+        // getEvent fills orientation.x, .y, .z from the heading, roll and
+        // pitch registers, in that order: .y is roll, not pitch.
+        if (!bno055_euler_to_sample(event.orientation.x, event.orientation.y, event.orientation.z,
+                                    out)) {
+            return false;
+        }
         out->time_ms = millis();
-        out->yaw_cd = static_cast<int16_t>(event.orientation.x * 100.0f);
-        out->pitch_cd = static_cast<int16_t>(event.orientation.y * 100.0f);
-        out->roll_cd = static_cast<int16_t>(event.orientation.z * 100.0f);
         out->valid = true;
         return true;
     }
