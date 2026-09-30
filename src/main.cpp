@@ -51,6 +51,28 @@ floodnet::PollingSampler g_sampler(g_gps, g_imu, g_radio, g_clock, NODE_ID, PACK
 const char *const SAMPLER_NAME = "polling";
 #endif
 
+#if defined(FLOODNET_NODE_DUTY_CYCLED) || defined(FLOODNET_SAMPLER_INTERRUPT)
+/// Prints one line per transmit end, for the link regression tool's board
+/// target: TX,<node_id>,<boot_count>,<seq>,<millis>,<ok|timeout>.
+class SerialTxListener : public floodnet::ITxListener {
+  public:
+    void on_tx_end(uint16_t node_id, uint16_t boot_count, uint32_t seq, uint32_t now_ms,
+                   bool completed) override {
+        Serial.print("TX,");
+        Serial.print(node_id);
+        Serial.print(',');
+        Serial.print(boot_count);
+        Serial.print(',');
+        Serial.print(seq);
+        Serial.print(',');
+        Serial.print(now_ms);
+        Serial.print(',');
+        Serial.println(completed ? "ok" : "timeout");
+    }
+};
+SerialTxListener g_tx_listener;
+#endif
+
 }  // namespace
 
 void setup() {
@@ -69,7 +91,10 @@ void setup() {
     Serial.println(" sampler");
 
 #if defined(FLOODNET_NODE_DUTY_CYCLED)
+    g_node.set_tx_listener(&g_tx_listener);
     g_node.begin();
+#elif defined(FLOODNET_SAMPLER_INTERRUPT)
+    g_sampler.set_tx_listener(&g_tx_listener);
 #endif
 }
 

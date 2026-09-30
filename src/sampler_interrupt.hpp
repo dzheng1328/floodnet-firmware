@@ -8,6 +8,7 @@
 #include <floodnet/hal/gps.hpp>
 #include <floodnet/hal/imu.hpp>
 #include <floodnet/hal/radio.hpp>
+#include <floodnet/hal/tx_listener.hpp>
 #include <floodnet/nmea.hpp>
 #include <floodnet/packet.hpp>
 #include <floodnet/packet_queue.hpp>
@@ -87,11 +88,16 @@ class InterruptSampler {
     /// False before any record is queued.
     bool last_record_imu_valid() const { return last_record_imu_valid_; }
 
+    /// Told when each transmit ends, completed or abandoned. Default none, and
+    /// with none installed the sampler behaves exactly as before.
+    void set_tx_listener(ITxListener *listener) { tx_listener_ = listener; }
+
   private:
     bool collect_imu();
     size_t collect_gps();
     void enqueue(const GpsFix &fix);
     bool service_radio();
+    void notify_tx_end(bool completed);
 
     IGpsSource &gps_;
     IImuSource &imu_;
@@ -115,6 +121,9 @@ class InterruptSampler {
     uint16_t boot_count_;
     uint16_t battery_mv_;
     bool last_record_imu_valid_;
+    ITxListener *tx_listener_;
+    uint32_t tx_seq_;   ///< seq of the frame in flight
+    uint16_t tx_boot_;  ///< boot_count stamped into the frame in flight
 };
 
 }  // namespace floodnet
