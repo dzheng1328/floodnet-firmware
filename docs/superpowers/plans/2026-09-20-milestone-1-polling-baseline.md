@@ -2767,7 +2767,7 @@ See [docs/hardware.md](docs/hardware.md).
 
 ## About this repository
 
-A clean rewrite of firmware I built for a Duke research lab between 2024 and 2026.
+A clean rewrite of firmware I built for riva labs between 2024 and 2026.
 The original is on lab infrastructure and is not public, so this is written from scratch against
 the same requirements.
 ```
