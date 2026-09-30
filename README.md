@@ -772,7 +772,7 @@ floodnet-hil analyze hil-captures/attenuator_20db
 ```
 
 `capture` only records: each complete line from each port goes to `node.log` or `gateway.log`, prefixed with milliseconds since the capture started.
-A regular install is used rather than an editable one: on macOS with Python 3.14 the editable install's `.pth` file was marked hidden, which Python skips, and the command stopped importing.
+A regular install is used rather than an editable one: on the development machine, where the checkout sits in an iCloud-synced folder, the editable install's `.pth` file kept being marked hidden, recent Python versions skip hidden `.pth` files, and the command stopped importing.
 Each capture is one scenario; attenuators or distance are set by hand and named by the label.
 
 `analyze` prints one line:
@@ -782,8 +782,9 @@ HIL,label,tx_ok,tx_timeout,accepted,delivery,decode_errors,short_frames,unmatche
 ```
 
 - `accepted` counts `REC` lines whose `(node_id, boot_count, seq)` matches a `TX ... ok` line, each key once; `delivery` is `accepted / tx_ok`.
-- `unmatched_rec` counts `REC` keys with no `TX ... ok` line: corruption that altered the key without the CRC noticing, a gap in the node's log, a frame the node timed out on that still arrived, or a frame in flight when the node was reset.
-- `seq_gaps` counts sequence numbers missing between the lowest and highest the gateway accepted, per `(node_id, boot_count)`, from the gateway's log alone.
+- `unmatched_rec` counts `REC` keys with no `TX ... ok` line: corruption that altered the key without the CRC noticing, a gap in the node's log, a frame the node timed out on that still arrived, or a frame that completed while the node was hung before a watchdog reset.
+- `seq_gaps` counts sequence numbers missing between the lowest and highest accepted, per `(node_id, boot_count)`.
+  With a node log it uses only the `accepted` keys, so a key that corruption altered cannot add phantom gaps; with no node log it uses every `REC` key.
   The node numbers a record when it is queued, not when it is sent, so this counts records the node's queue dropped as well as frames lost on the air.
 - `malformed` counts lines in either log that do not parse, including a last line with no newline; they are counted, never skipped.
 
@@ -807,10 +808,12 @@ HIL,duty_cycled_lost_completion,287,1,287,1.000000,0,0,0,1,0,0,0,0
 HIL,duty_cycled_hang,288,0,288,1.000000,0,0,0,0,0,0,0,0
 ```
 
-Every line equals the simulation's own counts.
+In every line, `tx_ok`, `tx_timeout`, `unmatched_rec`, `decode_errors`, `accepted` and `malformed` equal the simulation's own counts; `delivery`, `seq_gaps` and RSSI are not cross-checked.
+The `decode_errors` check shows only that the parser counts the lines, because the simulation counts a decode error and writes its line in the same place.
 RSSI is 0 throughout because the simulation does not model it.
 The `interrupt` rows' large `seq_gaps` (49998 in the clean hour) are its queue dropping most fixes before they are sent, the counted-drop behaviour milestone 2 introduced, not channel loss.
-The lost-confirmation run shows the timeout as `tx_timeout` 1 and one sequence gap, and the hang run shows no gap because the gateway keys each boot separately.
+The lost-confirmation run shows the timeout as `tx_timeout` 1 and one sequence gap.
+The hang run shows no gap because the hang struck before a record was queued, so nothing was lost: the first boot sent sequence numbers 0 to 23 and the second 0 to 263.
 
 ## Known limitations
 
@@ -933,7 +936,7 @@ In `node_polling`, `TeensyRadio::transmit()` gives up after its 5000 ms `waitPac
 
 - **Bit errors are independent.** Real LoRa errors after demodulation arrive in bursts, which are harder on a CRC; the undetected-corruption figure is for the easy case.
 - **LoRa's own coding rate and interleaving are not modeled.** *p* is the post-demodulation bit-error rate the firmware sees, set as an input, not a raw channel figure and not a measurement.
-- **The board target is not built.** The design doc's "Target contract" says what a Teensy node plus the gateway over USB serial must report to feed the same output; nothing in this repository does it yet.
+- **The board target is built but has not run on a board.** Milestone 5 built it against the design doc's "Target contract"; see [Milestone 5: board target](#milestone-5-board-target).
 - **The fault group repeats milestone 3.** Its 3 of 5 and 5 of 5 were published before this tool existed.
 - **Run time.** `test_hil` took 37.9 s in the committed run.
   The whole native suite took about 73 to 78 s in the runs recorded on the development machine; that range is machine-specific and not a committed artifact, and CI runs all of it on every push.
@@ -944,7 +947,10 @@ In `node_polling`, `TeensyRadio::transmit()` gives up after its 5000 ms `waitPac
 - **RSSI is 0 in the simulation.** It is meaningful only on real boards.
 - **Capture times are host arrival times,** not radio times.
 - **A frame the node timed out on is never counted as sent,** even if the gateway received it; its `REC` then shows in `unmatched_rec`.
-- **A frame in flight when the watchdog resets the node has no `TX` line,** in the simulation and on hardware alike; the simulation counts these as orphans, and none occurred in the committed scenarios.
+- **A reset with a frame in flight would leave a `REC` with no `TX` line.** On hardware a frame that completes while the node is hung is never reported, because the reset comes before the sampler looks again; it would show in `unmatched_rec`.
+  The simulation cannot produce one: in `node_duty_cycled` the IMU, the only fault that hangs, and the radio are never powered together, and `test_hil_transcripts` asserts that no reset struck with a transmit in flight.
+- **USB serial across the Teensy's deep sleep is unverified.** The node calls `Serial.flush()` before `Snooze.deepSleep`, but Snooze's own example uses its `SnoozeUSBSerial` driver to keep USB serial working across sleep; a `TX` line printed just before sleep may be delayed or lost, and the first bench capture should compare `tx_ok` with the gateway's `REC` count to find out.
+- **`capture` reopens a port that drops,** as a reset makes the Teensy leave and rejoin USB, but only against fake ports in its tests.
 - **`node_polling` prints no `TX` line.**
 
 ### Not validated on hardware

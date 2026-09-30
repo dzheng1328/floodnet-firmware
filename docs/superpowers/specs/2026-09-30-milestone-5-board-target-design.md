@@ -179,3 +179,12 @@ Made during implementation.
 - **2026-09-30: tests import from `src`.** The pytest configuration sets `pythonpath = ["src"]`, because on macOS the editable install's `.pth` file was marked hidden and Python 3.14 skips hidden `.pth` files.
   For the same reason the README tells bench users to install `floodnet-hil` with a regular `pip install ./tools/hil`.
 - **2026-09-30: generated files ignored.** `.gitignore` gains `*.egg-info/`, `.pytest_cache/` and `.ruff_cache/`, which the editable install and the test tools create under `tools/hil/`.
+
+Made after the final review.
+
+- **2026-09-30: no orphan counting.** The planning revision "frames orphaned by a reboot" is withdrawn.
+  In `node_duty_cycled` the power plan never has the IMU and the radio on together, and the only fault that triggers a watchdog reset is an IMU hang, so no frame can be in flight at a reset; the orphan counter could never count anything.
+  The rig counts resets that strike with a transmit in flight instead, `test_hil_transcripts` asserts that count is 0, and `expected.json` has no `tx_orphaned` field; `tx_ok` is the radio's completed-frame count.
+- **2026-09-30: `seq_gaps` over matched keys.** With a node log, `seq_gaps` uses only the keys that match a `TX ... ok` line, because a key that undetected corruption altered could add billions of phantom gaps; with no node log it uses every `REC` key.
+- **2026-09-30: `capture` reopens a port that drops.** A reset makes the Teensy leave and rejoin USB; the capture discards the cut-off partial line, reopens the port every 0.5 s until it answers or the capture ends, and reports reconnects per port.
+- **2026-09-30: `Serial.flush()` before deep sleep.** Whether plain `Serial` survives `Snooze.deepSleep` on a Teensy 4.1 is unverified; the README lists it for the first bench capture.
