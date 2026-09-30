@@ -112,6 +112,10 @@ void test_e2e_group(void) {
             rig.set_channel(&channel);
             rig.run_until(kHilRunMs);
             TEST_ASSERT_TRUE_MESSAGE(rig.clock().now_ms() >= kHilRunMs, "run ended early");
+            // One channel pass per transmitted frame and none otherwise: no
+            // frame skips the channel and nothing is retransmitted through it.
+            TEST_ASSERT_EQUAL_UINT64_MESSAGE(rig.radio().sent_count(), channel.frames(),
+                                             "channel passes differ from frames sent");
             const uint32_t queued = rig.records_queued();
             TEST_ASSERT_TRUE_MESSAGE(queued > 0, "node queued nothing");
             const unsigned accepted = static_cast<unsigned>(rig.deliveries().size());

@@ -94,6 +94,20 @@ void test_every_bit_position_flips_at_rate_p(void) {
     }
 }
 
+void test_frames_counts_every_call_including_zero_p(void) {
+    NoisyChannel clean(0.0, kChannelSeed);
+    NoisyChannel noisy(1e-2, kChannelSeed);
+    uint8_t frame[kLen];
+    for (int i = 0; i < 37; ++i) {
+        fill(frame);
+        clean.corrupt(frame, kLen);
+        noisy.corrupt(frame, kLen);
+    }
+    TEST_ASSERT_EQUAL_UINT64(37, clean.frames());
+    TEST_ASSERT_EQUAL_UINT64(37, noisy.frames());
+    TEST_ASSERT_EQUAL_UINT64(0, clean.draws());
+}
+
 void test_same_seed_reproduces_the_same_corruption(void) {
     NoisyChannel a(1e-2, kChannelSeed);
     NoisyChannel b(1e-2, kChannelSeed);
@@ -114,6 +128,7 @@ int main(int, char **) {
     RUN_TEST(test_flip_rate_matches_p);
     RUN_TEST(test_tiny_p_flip_count_matches_expectation);
     RUN_TEST(test_every_bit_position_flips_at_rate_p);
+    RUN_TEST(test_frames_counts_every_call_including_zero_p);
     RUN_TEST(test_same_seed_reproduces_the_same_corruption);
     return UNITY_END();
 }

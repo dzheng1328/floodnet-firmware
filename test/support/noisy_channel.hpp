@@ -19,10 +19,11 @@ const uint64_t kChannelSeed = 0x466C6F6F644E6574ULL;
 /// at p = 0 cannot perturb anything.
 class NoisyChannel {
   public:
-    NoisyChannel(double p, uint64_t seed) : p_(p), state_(seed), draws_(0) {}
+    NoisyChannel(double p, uint64_t seed) : p_(p), state_(seed), draws_(0), frames_(0) {}
 
     /// Flips bits of `frame` in place and returns how many it flipped.
     size_t corrupt(uint8_t *frame, size_t len) {
+        ++frames_;
         if (p_ <= 0.0 || len == 0) {
             return 0;
         }
@@ -44,6 +45,8 @@ class NoisyChannel {
     }
 
     uint64_t draws() const { return draws_; }
+    /// Calls to corrupt(): frames that passed through the channel.
+    uint64_t frames() const { return frames_; }
     double p() const { return p_; }
 
   private:
@@ -71,6 +74,7 @@ class NoisyChannel {
     double p_;
     uint64_t state_;
     uint64_t draws_;
+    uint64_t frames_;
 };
 
 }  // namespace floodnet
