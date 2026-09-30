@@ -59,6 +59,9 @@ class DutyCycledNode {
     uint16_t boot_count() const { return boot_count_; }
     const InterruptSampler &sampler() const { return sampler_; }
 
+    /// Passed to the sampler, which does the transmitting.
+    void set_tx_listener(ITxListener *listener) { sampler_.set_tx_listener(listener); }
+
   private:
     void apply(const NodeActions &actions);
     void set_power(Peripheral p, bool on, bool *applied);

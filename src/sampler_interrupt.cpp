@@ -30,7 +30,10 @@ InterruptSampler::InterruptSampler(IGpsSource &gps, IImuSource &imu, IAsyncRadio
       version_(version),
       boot_count_(0),
       battery_mv_(0),
-      last_record_imu_valid_(false) {}
+      last_record_imu_valid_(false),
+      tx_listener_(nullptr),
+      tx_seq_(0),
+      tx_boot_(0) {}
 
 void InterruptSampler::set_node_status(uint16_t boot_count, uint16_t battery_mv) {
     boot_count_ = boot_count;
@@ -110,6 +113,7 @@ bool InterruptSampler::service_radio() {
     if (tx_in_flight_ && !busy) {
         tx_in_flight_ = false;
         ++packets_sent_;
+        notify_tx_end(true);
         return true;
     }
 
@@ -123,6 +127,7 @@ bool InterruptSampler::service_radio() {
         if (tx_timeouts_ != 0xFFFF) {
             ++tx_timeouts_;
         }
+        notify_tx_end(false);
         return true;
     }
 
@@ -162,7 +167,15 @@ bool InterruptSampler::service_radio() {
 
     tx_in_flight_ = true;
     tx_started_ms_ = clock_.now_ms();
+    tx_seq_ = packet.seq;
+    tx_boot_ = packet.boot_count;
     return true;
+}
+
+void InterruptSampler::notify_tx_end(bool completed) {
+    if (tx_listener_ != nullptr) {
+        tx_listener_->on_tx_end(node_id_, tx_boot_, tx_seq_, clock_.now_ms(), completed);
+    }
 }
 
 void InterruptSampler::step() {
