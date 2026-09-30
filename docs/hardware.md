@@ -43,6 +43,20 @@ The handler sets a flag and returns; the blocking I2C read stays in main context
 
 The INT pin is left unconnected, which is why it does not appear in the pin assignment table.
 
+## IMU orientation fields
+
+The BNO055's Euler registers are heading (`0x1A`), roll (`0x1C`) and pitch (`0x1E`), each an int16 in 1/16 degree.
+`Adafruit_BNO055::getEvent` reads them in one burst and copies them into `orientation.x`, `.y` and `.z` in that order, so `.y` is roll and `.z` is pitch; both facts are read from the vendored library 1.6.4 (`Adafruit_BNO055.h` and `getVector()`), not observed on a board.
+The library's `UNIT_SEL` write is commented out, so the sensor keeps its reset units, degrees and Android orientation, in which the BNO055 data sheet (BST-BNO055-DS000) gives heading 0 to 360 degrees, roll -90 to +90 and pitch -180 to +180.
+
+Each angle travels as an int16 in centidegrees, and 360 degrees is 36000 cd, which does not fit.
+`bno055_euler_to_sample()` in `lib/floodnet_core/src/orientation.cpp` therefore rounds each angle to the nearest centidegree and wraps it into [-18000, 18000): a heading of 180 degrees or more arrives negative, so 350 degrees is sent as -1000 cd.
+The wrap does not depend on the data sheet ranges above being exact; any finite angle lands in range.
+
+Before this conversion existed, the driver cast `heading * 100.0f` straight to `int16_t`.
+That is undefined behaviour for every heading above 327.67 degrees, about 9% of the circle, and it also wrote roll into `pitch_cd` and pitch into `roll_cd`.
+Every record sent before the fix has those two fields swapped.
+
 ## Build configuration notes
 
 Two choices in `platformio.ini` are not obvious from reading the file alone, so a pointer here saves someone re-deriving them.
