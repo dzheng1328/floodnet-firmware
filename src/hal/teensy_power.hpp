@@ -80,6 +80,11 @@ class TeensyPower : public IPower {
         const uint32_t whole_s = static_cast<uint32_t>(remaining) / 1000;
         if (whole_s > 0) {
             timer_.setTimer(whole_s);
+            // Push out anything still queued on USB serial (the TX line of
+            // the transmit that just ended) before the clocks stop. Whether
+            // plain Serial survives deepSleep on a Teensy 4.1 is unverified;
+            // Snooze's own example uses its SnoozeUSBSerial driver instead.
+            Serial.flush();
             Snooze.deepSleep(block_);
             // Snooze 6.3.9 (src/hal/TEENSY_40/SnoozeTimer.cpp) stores
             // period = seconds * 32768 and on wake adds period / 1000 to
