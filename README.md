@@ -7,13 +7,17 @@ The gateway validates what it receives and writes one line per observation to a 
 
 ## Status
 
-Milestone 4: a host-side link regression and signal-integrity tool, on top of milestone 3's power management and fault recovery.
+Milestone 5: the board target for milestone 4's link regression tool, built and cross-checked against simulated transcripts; no board has run it yet.
 Milestone 3's node build puts the milestone 2 sampler under a state machine that powers each peripheral only while it is needed, reports once every 5 minutes, sleeps the Teensy in between, and recovers from a wedged radio and a hung bus.
 The result is measured as sensor downtime, in the host simulation; see [Milestone 3: downtime](#milestone-3-downtime).
 
 Milestone 4 adds a link regression and signal-integrity tool, host-side only.
 It sweeps a seeded bit-error channel between a node and the gateway, and reports link delivery, undetected corruption, end-to-end record delivery per build, and a regression pass rate of 19 of 21; see [Milestone 4: link regression and signal integrity](#milestone-4-link-regression-and-signal-integrity).
 No firmware under `lib/` or `src/` changed in milestone 4.
+
+Milestone 5 adds the board target for that tool: the node prints a `TX` line for every transmit it finishes, the gateway's lines are formatted by shared code, and a Python tool, `floodnet-hil`, captures both boards' USB serial and analyzes it.
+It is tested against simulated transcripts from the same host simulation and agrees with the simulation's own counts exactly; see [Milestone 5: board target](#milestone-5-board-target).
+It makes no new measurements: the first real figures need two boards and one `capture` run.
 
 There are three node build targets, and all three remain selectable so every comparison stays reproducible:
 
@@ -736,6 +740,78 @@ What the rows do show is that every transmitted frame crosses the channel exactl
 At *p* = 0.001, `interrupt` delivered 19742 of the 28412 packets it delivered on a clean channel (0.695), and `duty_cycled` 191 of 288 (0.663), against an expected link ratio of 0.698.
 For a node reporting every 5 minutes with no retransmission, a post-demodulation BER of 0.001 means about 30% of reports are lost (1 - 0.698); this run does not measure what that does to downtime.
 
+### Milestone 5: board target
+
+This section describes tooling, not measurements.
+Everything below was produced from simulated transcripts; no board has run any of it.
+
+#### What the boards print
+
+`node_interrupt` and `node_duty_cycled` print one line on USB serial each time a transmit ends:
+
+```text
+TX,<node_id>,<boot_count>,<seq>,<millis>,<ok|timeout>
+```
+
+`ok` means the radio confirmed the frame.
+`timeout` means the node abandoned it after 5000 ms without a confirmation; it may or may not have reached the air, so it is never counted as sent.
+`boot_count` is 0 for `node_interrupt`, which sends v0x01 and has no boot counter.
+`node_polling` prints no `TX` line.
+
+The gateway prints the same `REC` line as before, and `ERR,decode,<count>` and `ERR,short,<length>,<count>` for bad frames.
+The `REC` and `ERR,decode` lines are now formatted by `lib/floodnet_core/src/gateway_format.cpp`, which the simulation uses too, so the simulated gateway writes the same bytes the board prints.
+
+#### Using it on two boards
+
+Flash `node_duty_cycled` (or `node_interrupt`) to one Teensy and `gateway` to another, connect both over USB, then:
+
+```sh
+pip install ./tools/hil
+floodnet-hil capture --node /dev/cu.usbmodemA --gateway /dev/cu.usbmodemB --label attenuator_20db --seconds 3600
+floodnet-hil analyze hil-captures/attenuator_20db
+```
+
+`capture` only records: each complete line from each port goes to `node.log` or `gateway.log`, prefixed with milliseconds since the capture started.
+A regular install is used rather than an editable one: on macOS with Python 3.14 the editable install's `.pth` file was marked hidden, which Python skips, and the command stopped importing.
+Each capture is one scenario; attenuators or distance are set by hand and named by the label.
+
+`analyze` prints one line:
+
+```text
+HIL,label,tx_ok,tx_timeout,accepted,delivery,decode_errors,short_frames,unmatched_rec,seq_gaps,rssi_min,rssi_median,rssi_max,malformed
+```
+
+- `accepted` counts `REC` lines whose `(node_id, boot_count, seq)` matches a `TX ... ok` line, each key once; `delivery` is `accepted / tx_ok`.
+- `unmatched_rec` counts `REC` keys with no `TX ... ok` line: corruption that altered the key without the CRC noticing, a gap in the node's log, a frame the node timed out on that still arrived, or a frame in flight when the node was reset.
+- `seq_gaps` counts sequence numbers missing between the lowest and highest the gateway accepted, per `(node_id, boot_count)`, from the gateway's log alone.
+  The node numbers a record when it is queued, not when it is sent, so this counts records the node's queue dropped as well as frames lost on the air.
+- `malformed` counts lines in either log that do not parse, including a last line with no newline; they are counted, never skipped.
+
+#### Cross-check against the simulation
+
+A native test, `test_hil_transcripts`, runs eight frozen scenarios on the host simulation and writes each one's `node.log`, `gateway.log` and `expected.json` (the simulation's own counts) under `build/hil-transcripts/`.
+The scenarios are each build on a channel with a bit-error rate of 0, 1e-3 and 1e-2, and two `duty_cycled` fault runs, a lost transmit confirmation and a hang that the watchdog resets.
+`pytest tools/hil` then runs `analyze` on each and requires `tx_ok`, `tx_timeout`, `unmatched_rec` and `decode_errors` to equal `expected.json` exactly, `accepted` to equal the gateway's `REC` lines minus `unmatched_rec`, and `malformed` to be 0.
+CI runs both, in that order.
+
+The analyze output, committed as [docs/results/milestone-5-crosscheck.txt](docs/results/milestone-5-crosscheck.txt):
+
+```text
+HIL,interrupt_p0,1176,0,1176,1.000000,0,0,0,49998,0,0,0,0
+HIL,interrupt_p1e-3,1176,0,786,0.668367,390,0,0,50345,0,0,0,0
+HIL,interrupt_p1e-2,1176,0,29,0.024660,1147,0,0,50718,0,0,0,0
+HIL,duty_cycled_p0,288,0,288,1.000000,0,0,0,0,0,0,0,0
+HIL,duty_cycled_p1e-3,288,0,191,0.663194,97,0,0,93,0,0,0,0
+HIL,duty_cycled_p1e-2,288,0,8,0.027778,280,0,0,272,0,0,0,0
+HIL,duty_cycled_lost_completion,287,1,287,1.000000,0,0,0,1,0,0,0,0
+HIL,duty_cycled_hang,288,0,288,1.000000,0,0,0,0,0,0,0,0
+```
+
+Every line equals the simulation's own counts.
+RSSI is 0 throughout because the simulation does not model it.
+The `interrupt` rows' large `seq_gaps` (49998 in the clean hour) are its queue dropping most fixes before they are sent, the counted-drop behaviour milestone 2 introduced, not channel loss.
+The lost-confirmation run shows the timeout as `tx_timeout` 1 and one sequence gap, and the hang run shows no gap because the gateway keys each boot separately.
+
 ## Known limitations
 
 Milestone 1's polling loop blocked on the IMU and on radio transmission.
@@ -862,6 +938,15 @@ In `node_polling`, `TeensyRadio::transmit()` gives up after its 5000 ms `waitPac
 - **Run time.** `test_hil` took 37.9 s in the committed run.
   The whole native suite took about 73 to 78 s in the runs recorded on the development machine; that range is machine-specific and not a committed artifact, and CI runs all of it on every push.
 
+### Milestone 5 board target
+
+- **No board has run it.** The `TX` line, the shared gateway formatting and `floodnet-hil` are exercised only against simulated transcripts, and `capture` only against fake serial ports in its unit tests.
+- **RSSI is 0 in the simulation.** It is meaningful only on real boards.
+- **Capture times are host arrival times,** not radio times.
+- **A frame the node timed out on is never counted as sent,** even if the gateway received it; its `REC` then shows in `unmatched_rec`.
+- **A frame in flight when the watchdog resets the node has no `TX` line,** in the simulation and on hardware alike; the simulation counts these as orphans, and none occurred in the committed scenarios.
+- **`node_polling` prints no `TX` line.**
+
 ### Not validated on hardware
 
 No board has been available for milestones 2 or 3.
@@ -891,8 +976,8 @@ Specifically unverified:
 - **Ring buffer.** `lib/floodnet_core/include/floodnet/ring_buffer.hpp` exists, is lock-free, and is fully tested, but it sits on no data path.
   Mapping each acquisition path onto the hardware left it without a consumer: `HardwareSerial` owns the GPS receive interrupt, RadioHead owns the radio's, the IMU handler can only set a flag because retrieving a sample needs a blocking I2C transaction, and the outbound queue needs drop-oldest, which single-producer single-consumer ordering forbids.
   It is kept and labelled rather than quietly wired into a path that does not need it.
-- **Sequence-gap counting.** Deferred to milestone 5.
-  It is a receiver-side concern and belongs with the gateway/host tooling work planned there.
+- **Sequence-gap counting.** Receiver-side counting now exists as `floodnet-hil analyze`'s `seq_gaps`.
+  Nothing on the gateway board counts gaps itself.
 - **Low-battery load shedding.** Deliberately left out of milestone 3: a policy such as "report every 20 minutes below 3.5 V" would move the downtime figure, and one fixed policy measured honestly is worth more than a tunable one.
   `battery_mv` travels in-band in v0x02 so a later milestone has the data to design one, though in simulation it is still only the placeholder described above.
 - **Host HAL trace replay.** The design spec calls for a host HAL implementation that replays recorded sensor traces from disk.
@@ -900,7 +985,7 @@ Specifically unverified:
   That substitution is a reasonable milestone-1 choice, sufficient for the timing-driven tests this milestone needs, but it is not what the spec describes.
   Milestone 4's link regression tool did not add recorded-trace replay, so it remains deferred.
 - **Hardware-in-the-loop validation** of everything listed in [Not validated on hardware](#not-validated-on-hardware), starting with whether WDOG1 counts through `deepSleep`.
-- **The board target for the link regression tool.** A Teensy node and a gateway, with a host script reading the gateway's `REC` lines over USB serial, optionally with attenuators in the link, per the milestone 4 design doc's "Target contract".
+- **Running the board target on hardware.** Two boards and `floodnet-hil capture` at a few attenuations or distances, with the results published as measured.
 
 ## Hardware
 

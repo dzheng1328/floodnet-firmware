@@ -1,7 +1,7 @@
 # FloodNet Milestone 5: Board Target for the Link Regression Tool
 
 Date: 2026-09-30
-Status: approved
+Status: implemented
 Parent spec: `docs/superpowers/specs/2026-09-20-floodnet-firmware-design.md`
 Previous milestone: `docs/superpowers/specs/2026-09-30-milestone-4-hil-regression-design.md`
 
@@ -173,3 +173,9 @@ Made while planning, before any code.
   The rig counts these as orphans, recognised by a `boot_count` in the transmitted frame that differs from the current node's.
   `expected.json` gains `tx_orphaned`; `tx_ok` is the radio's completed-frame count minus orphans, and `unmatched_rec` includes accepted orphans as well as key-altering corruption.
   The same can happen on hardware, and the README will say so.
+
+Made during implementation.
+
+- **2026-09-30: tests import from `src`.** The pytest configuration sets `pythonpath = ["src"]`, because on macOS the editable install's `.pth` file was marked hidden and Python 3.14 skips hidden `.pth` files.
+  For the same reason the README tells bench users to install `floodnet-hil` with a regular `pip install ./tools/hil`.
+- **2026-09-30: generated files ignored.** `.gitignore` gains `*.egg-info/`, `.pytest_cache/` and `.ruff_cache/`, which the editable install and the test tools create under `tools/hil/`.
