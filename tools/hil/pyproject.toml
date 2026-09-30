@@ -27,3 +27,6 @@ select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Import the package from src directly, so the tests do not depend on an
+# editable install's .pth file being honoured.
+pythonpath = ["src"]

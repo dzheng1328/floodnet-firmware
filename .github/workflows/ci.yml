@@ -23,6 +23,12 @@ jobs:
           fi
       - name: Run unit tests
         run: pio test -e native
+      - name: Install host tool
+        run: pip install -e 'tools/hil[test]'
+      - name: Lint host tool
+        run: ruff check tools/hil
+      - name: Test host tool against the simulated transcripts
+        run: pytest tools/hil
 
   build:
     name: Firmware build
