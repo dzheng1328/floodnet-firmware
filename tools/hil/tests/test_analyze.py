@@ -58,6 +58,20 @@ def test_seq_gaps_per_boot():
     assert s.seq_gaps == 2
 
 
+def test_seq_gaps_ignore_rec_keys_no_tx_matches():
+    # A REC whose key corruption altered (seq 2**31) must not count ~2**31 gaps.
+    s = run(
+        [tx(1, 66, 1, 0), tx(2, 66, 1, 1)],
+        [rec(1, 66, 0, 1), rec(2, 66, 1, 1), rec(3, 66, 2**31, 1)],
+    )
+    assert (s.unmatched_rec, s.seq_gaps) == (1, 0)
+
+
+def test_seq_gaps_without_a_node_log_use_every_rec():
+    s = run([], [rec(1, 66, 0, 1), rec(2, 66, 3, 1)])
+    assert s.seq_gaps == 2
+
+
 def test_rssi_with_no_accepted_frames():
     s = run([tx(1, 66, 1, 0)], [])
     assert (s.rssi_min, s.rssi_median, s.rssi_max) == (None, None, None)

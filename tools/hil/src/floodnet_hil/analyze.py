@@ -66,7 +66,9 @@ def analyze(node: ParsedLog, gateway: ParsedLog, label: str) -> Summary:
         decode_errors=gateway.decode_errors,
         short_frames=gateway.short_frames,
         unmatched_rec=len(first_rec) - len(matched),
-        seq_gaps=_seq_gaps(set(first_rec)),
+        # With a node log, only matched keys: a key the channel altered could
+        # otherwise add billions of phantom gaps. Without one, every REC key.
+        seq_gaps=_seq_gaps({r.key for r in matched} if node.tx else set(first_rec)),
         rssi_min=rssi[0] if rssi else None,
         rssi_median=rssi[(len(rssi) - 1) // 2] if rssi else None,
         rssi_max=rssi[-1] if rssi else None,
