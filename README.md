@@ -7,8 +7,8 @@ The gateway validates what it receives and writes one line per observation to a 
 
 ## Status
 
-Milestone 3: power management and fault recovery.
-A new node build puts the milestone 2 sampler under a state machine that powers each peripheral only while it is needed, reports once every 5 minutes, sleeps the Teensy in between, and recovers from a wedged radio and a hung bus.
+Milestone 4: a host-side link regression and signal-integrity tool, on top of milestone 3's power management and fault recovery.
+Milestone 3's node build puts the milestone 2 sampler under a state machine that powers each peripheral only while it is needed, reports once every 5 minutes, sleeps the Teensy in between, and recovers from a wedged radio and a hung bus.
 The result is measured as sensor downtime, in the host simulation; see [Milestone 3: downtime](#milestone-3-downtime).
 
 Milestone 4 adds a link regression and signal-integrity tool, host-side only.
@@ -707,7 +707,7 @@ What it does show is how steep the curve is for a frame with no forward error co
 
 The integrity run corrupted 973140 of 1000000 frames, and 10 of those were accepted: about 1 in 97314 corrupted frames.
 The advance bound was 27.409 (`lambda` = 973140 / 65536 = 14.849), so the row passes.
-The link sweep's *p* = 0.01 row also accepted 2 corrupted frames out of 100000.
+The link sweep's *p* = 0.01 row accepted 2 corrupted frames, but it is not a second sample: both runs build frame *i* the same way from the same seed, so its 100000 frames are the integrity run's first 100000, and its 2 are among the 10.
 Undetected corruption was 0 at every lower BER point.
 Independent bit errors are the easy case for a CRC; real LoRa errors after demodulation arrive in bursts, which this run does not test.
 
@@ -724,15 +724,17 @@ Independent bit errors are the easy case for a CRC; real LoRa errors after demod
 | 0.003 | 9601 / 1237597 | 0.007758 | 87 / 288 | 0.302083 |
 | 0.01 | 772 / 1237597 | 0.000624 | 8 / 288 | 0.027778 |
 
-The gap between the builds is queue policy, not noise.
-`interrupt` queues every fix, 1237597 in 24 hours, and can transmit only about one SF12 packet every 3 s, so even on a clean channel it delivers 2.3% of what it queued and its 8-deep queue discards the rest.
+The gap between the builds is queue policy and reporting rate, not the channel.
+`interrupt` queues a record for every fix, 1237597 in 24 hours, and can transmit only about one SF12 packet every 3 s, so even on a clean channel it delivers 2.3% of what it queued; its 8-deep queue discards almost all of the rest, and up to 8 are still queued when the run ends.
 `duty_cycled` queues one record per 5-minute slot, 288 a day, and on a clean channel delivers all of them.
 Neither number says one build is more reliable in general: `interrupt` still delivers about 99 times as many records per day (28412 against 288), because it reports continuously and `duty_cycled` reports every 5 minutes by design.
 
-Once the channel is noisy, both builds lose roughly the share of transmitted frames the link sweep predicts, because neither retransmits.
-At *p* = 0.001, `interrupt` delivered 19742 of the 28412 packets it delivered on a clean channel (0.695), and `duty_cycled` 191 of 288 (0.663), against a link ratio of 0.696.
-`duty_cycled`'s 288 samples are too few to separate 0.663 from 0.696: the binomial standard deviation at that size is about 7.8 packets, and the difference is about 10.
-For a node reporting every 5 minutes with no retransmission, a post-demodulation BER of 0.001 means about one report in three is lost; this run does not measure what that does to downtime.
+Once the channel is noisy, these rows are not an independent check on the link sweep.
+Every channel in this tool starts from the same frozen seed, and its draws depend only on *p* and the frame length, never on the frame's contents, so the *k*-th frame a build transmits gets exactly the error pattern of link-sweep frame *k*.
+The end-to-end rows therefore reuse the link sweep's error patterns: `duty_cycled`'s 191 of 288 at *p* = 0.001 is the error-free share of the first 288 of those patterns, not a fresh sample.
+What the rows do show is that every transmitted frame crosses the channel exactly once, with no retransmission; `test_hil` asserts that each end-to-end run's channel passes equal its radio's frames sent.
+At *p* = 0.001, `interrupt` delivered 19742 of the 28412 packets it delivered on a clean channel (0.695), and `duty_cycled` 191 of 288 (0.663), against an expected link ratio of 0.698.
+For a node reporting every 5 minutes with no retransmission, a post-demodulation BER of 0.001 means about 30% of reports are lost (1 - 0.698); this run does not measure what that does to downtime.
 
 ## Known limitations
 
@@ -857,7 +859,8 @@ In `node_polling`, `TeensyRadio::transmit()` gives up after its 5000 ms `waitPac
 - **LoRa's own coding rate and interleaving are not modeled.** *p* is the post-demodulation bit-error rate the firmware sees, set as an input, not a raw channel figure and not a measurement.
 - **The board target is not built.** The design doc's "Target contract" says what a Teensy node plus the gateway over USB serial must report to feed the same output; nothing in this repository does it yet.
 - **The fault group repeats milestone 3.** Its 3 of 5 and 5 of 5 were published before this tool existed.
-- **Run time.** `test_hil` took 37.9 s in the committed run, and one run of the whole native suite, now 226 test cases, took 78.1 s on the development machine; CI runs all of it on every push.
+- **Run time.** `test_hil` took 37.9 s in the committed run.
+  The whole native suite took about 73 to 78 s in the runs recorded on the development machine; that range is machine-specific and not a committed artifact, and CI runs all of it on every push.
 
 ### Not validated on hardware
 
