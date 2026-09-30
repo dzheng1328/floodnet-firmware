@@ -143,8 +143,10 @@ struct ExhaustiveResult {
 /// Every error pattern spanning 1 to kMaxBurstSpan bits, at every position
 /// in the frame, in transmission order (byte 0 first, most significant bit
 /// first). For a span w >= 2 the first and last bits are set and the w - 2
-/// bits between them take every value.
-inline ExhaustiveResult run_exhaustive_bursts(const uint8_t *sent) {
+/// bits between them take every value. `missed(errors, first, last)` says
+/// whether the receiver let that pattern through.
+template <typename Missed>
+inline ExhaustiveResult for_each_short_burst(Missed missed) {
     ExhaustiveResult r = {0, 0, 0, 0};
     const size_t bits = PACKET_SIZE * 8;
     uint8_t errors[PACKET_SIZE];
@@ -163,18 +165,24 @@ inline ExhaustiveResult run_exhaustive_bursts(const uint8_t *sent) {
                         errors[bit / 8] |= static_cast<uint8_t>(0x80u >> (bit % 8));
                     }
                 }
-                const bool missed = pattern_undetected(sent, errors);
+                const bool miss = missed(static_cast<const uint8_t *>(errors), a, last);
                 if (crc_field) {
                     ++r.crc_patterns;
-                    r.crc_undetected += missed ? 1 : 0;
+                    r.crc_undetected += miss ? 1 : 0;
                 } else {
                     ++r.data_patterns;
-                    r.data_undetected += missed ? 1 : 0;
+                    r.data_undetected += miss ? 1 : 0;
                 }
             }
         }
     }
     return r;
+}
+
+/// The exhaustive short-burst check against the real decoder.
+inline ExhaustiveResult run_exhaustive_bursts(const uint8_t *sent) {
+    return for_each_short_burst(
+        [sent](const uint8_t *errors, size_t, size_t) { return pattern_undetected(sent, errors); });
 }
 
 }  // namespace floodnet
