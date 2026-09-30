@@ -1,7 +1,7 @@
 # FloodNet Milestone 5: Board Target for the Link Regression Tool
 
 Date: 2026-09-30
-Status: draft, awaiting review
+Status: approved
 Parent spec: `docs/superpowers/specs/2026-09-20-floodnet-firmware-design.md`
 Previous milestone: `docs/superpowers/specs/2026-09-30-milestone-4-hil-regression-design.md`
 
