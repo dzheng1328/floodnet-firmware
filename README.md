@@ -7,9 +7,13 @@ The gateway validates what it receives and writes one line per observation to a 
 
 ## Status
 
-Milestone 3: power management and fault recovery.
-A new node build puts the milestone 2 sampler under a state machine that powers each peripheral only while it is needed, reports once every 5 minutes, sleeps the Teensy in between, and recovers from a wedged radio and a hung bus.
+Milestone 4: a host-side link regression and signal-integrity tool, on top of milestone 3's power management and fault recovery.
+Milestone 3's node build puts the milestone 2 sampler under a state machine that powers each peripheral only while it is needed, reports once every 5 minutes, sleeps the Teensy in between, and recovers from a wedged radio and a hung bus.
 The result is measured as sensor downtime, in the host simulation; see [Milestone 3: downtime](#milestone-3-downtime).
+
+Milestone 4 adds a link regression and signal-integrity tool, host-side only.
+It sweeps a seeded bit-error channel between a node and the gateway, and reports link delivery, undetected corruption, end-to-end record delivery per build, and a regression pass rate of 19 of 21; see [Milestone 4: link regression and signal integrity](#milestone-4-link-regression-and-signal-integrity).
+No firmware under `lib/` or `src/` changed in milestone 4.
 
 There are three node build targets, and all three remain selectable so every comparison stays reproducible:
 
@@ -579,6 +583,159 @@ So `scenario_ms - battery` is whichever of those two came later.
   The lost edge, the IMU failure and the hang again cost nothing, for the reasons given under experiment 2.
   It died between 22707532 and 23307532 ms sooner than experiment 1's 1323301745 ms, about 0.26 to 0.27 days sooner; the only difference between the runs is the faults, so that is the energy they cost, and the output does not break it down by fault.
 
+### Milestone 4: link regression and signal integrity
+
+These are simulated measurements from the host test suite, not field data.
+The tool rebuilds the lab's hardware-in-the-loop regression and signal-integrity tool against FloodNet, but no board is involved: it runs against the host simulation only.
+The design, every sweep point, sample size, seed and pass criterion were frozen in [the milestone 4 design doc](docs/superpowers/specs/2026-09-30-milestone-4-hil-regression-design.md) before any of its code existed.
+
+Reproduce with:
+
+```sh
+pio test -e native -f test_hil -v
+```
+
+The first complete run is committed unchanged as [docs/results/milestone-4-hil-regression.txt](docs/results/milestone-4-hil-regression.txt), and every line below is copied from it.
+
+#### What it does
+
+Noise enters as a per-bit flip probability *p*, applied independently to every bit of a 45-byte (360-bit) frame by a seeded channel (`test/support/noisy_channel.hpp`).
+It does not model SNR, spreading-factor gain, LoRa's own coding rate or interleaving, or bursts: *p* is the post-demodulation bit-error rate the firmware sees, and it is set, not measured.
+
+- **Link sweep:** 100 000 v0x02 frames per BER point go through the channel into the real `decode_packet()`.
+  The expected share accepted is `(1 - p)^360`, the chance no bit flips; a row passes when the accepted count is within three standard deviations of that.
+- **Integrity run:** 1 000 000 frames at *p* = 0.01, counting frames that were corrupted and still accepted (undetected corruption).
+  A row passes when that count is at most `lambda + 3 sqrt(lambda) + 1`, where `lambda` is corrupted frames / 65536, an approximation fixed in advance.
+- **Transparency:** each build runs 24 simulated hours with the channel at *p* = 0 and without it; the gateway records must be identical.
+- **Faults:** milestone 3's five experiment 2 faults per build, passing when the node is not down at the end of the run.
+- **End-to-end:** each build runs 24 simulated hours per BER point with the channel between its radio and the gateway, and reports unique packets accepted over records the node queued (sequence numbers issued across every boot).
+  These rows are reported, not graded.
+
+#### Raw output
+
+```text
+LINK,0,100000,100000,100000.0,1.000000,1.000000,0,1
+LINK,1e-06,100000,99973,99964.0,0.999730,0.999640,0,1
+LINK,1e-05,100000,99601,99640.6,0.996010,0.996406,0,1
+LINK,0.0001,100000,96426,96463.9,0.964260,0.964639,0,1
+LINK,0.0003,100000,89823,89761.3,0.898230,0.897613,0,1
+LINK,0.001,100000,69617,69755.1,0.696170,0.697551,0,1
+LINK,0.003,100000,33778,33904.5,0.337780,0.339045,0,1
+LINK,0.01,100000,2741,2683.3,0.027410,0.026833,2,1
+INTEGRITY,0.01,1000000,973140,10,27.409,1
+TRANSPARENT,interrupt,28412,28412,1,1
+TRANSPARENT,duty_cycled,288,288,1,1
+FAULT,interrupt,fault_lost_completion,1,1
+FAULT,interrupt,fault_sky_blockage,1,1
+FAULT,interrupt,fault_imu_failing,1,1
+FAULT,interrupt,fault_radio_wedge,0,0
+FAULT,interrupt,fault_hang,0,0
+FAULT,duty_cycled,fault_lost_completion,1,1
+FAULT,duty_cycled,fault_sky_blockage,1,1
+FAULT,duty_cycled,fault_imu_failing,1,1
+FAULT,duty_cycled,fault_radio_wedge,1,1
+FAULT,duty_cycled,fault_hang,1,1
+E2E,interrupt,0,1237597,28412,0.022957
+E2E,interrupt,1e-06,1237597,28405,0.022952
+E2E,interrupt,1e-05,1237597,28296,0.022864
+E2E,interrupt,0.0001,1237597,27379,0.022123
+E2E,interrupt,0.0003,1237597,25537,0.020634
+E2E,interrupt,0.001,1237597,19742,0.015952
+E2E,interrupt,0.003,1237597,9601,0.007758
+E2E,interrupt,0.01,1237597,772,0.000624
+E2E,duty_cycled,0,288,288,1.000000
+E2E,duty_cycled,1e-06,288,288,1.000000
+E2E,duty_cycled,1e-05,288,286,0.993056
+E2E,duty_cycled,0.0001,288,277,0.961806
+E2E,duty_cycled,0.0003,288,254,0.881944
+E2E,duty_cycled,0.001,288,191,0.663194
+E2E,duty_cycled,0.003,288,87,0.302083
+E2E,duty_cycled,0.01,288,8,0.027778
+REG,link,-,8,8
+REG,integrity,-,1,1
+REG,transparency,interrupt,1,1
+REG,fault,interrupt,3,5
+REG,transparency,duty_cycled,1,1
+REG,fault,duty_cycled,5,5
+REG,all,-,19,21
+```
+
+The line formats are:
+
+```text
+LINK,ber,frames,accepted,expected_accepted,ratio,expected_ratio,undetected,pass
+INTEGRITY,ber,frames,corrupted,undetected,bound,pass
+TRANSPARENT,build,records_with_channel,records_without,identical,pass
+FAULT,build,fault,recovered,pass
+E2E,build,ber,records_queued,accepted_unique,delivery
+REG,group,build,passed,total
+```
+
+#### Regression pass rate: 19 of 21
+
+| Group | Build | Passed |
+|---|---|---|
+| link | - | 8 of 8 |
+| integrity | - | 1 of 1 |
+| transparency | `interrupt` | 1 of 1 |
+| transparency | `duty_cycled` | 1 of 1 |
+| fault | `interrupt` | 3 of 5 |
+| fault | `duty_cycled` | 5 of 5 |
+
+The two failing rows are `interrupt` under `fault_radio_wedge` and `fault_hang`.
+That build has no radio power cycle and no watchdog, so it does not recover from either.
+Milestone 3 already published this; the fault group re-checks it as a regression and adds no new evidence.
+
+#### Link delivery
+
+| BER | Accepted | Expected | Measured ratio | Expected ratio |
+|---|---|---|---|---|
+| 0 | 100000 | 100000.0 | 1.000000 | 1.000000 |
+| 1e-06 | 99973 | 99964.0 | 0.999730 | 0.999640 |
+| 1e-05 | 99601 | 99640.6 | 0.996010 | 0.996406 |
+| 0.0001 | 96426 | 96463.9 | 0.964260 | 0.964639 |
+| 0.0003 | 89823 | 89761.3 | 0.898230 | 0.897613 |
+| 0.001 | 69617 | 69755.1 | 0.696170 | 0.697551 |
+| 0.003 | 33778 | 33904.5 | 0.337780 | 0.339045 |
+| 0.01 | 2741 | 2683.3 | 0.027410 | 0.026833 |
+
+Every row matches `(1 - p)^360` within three standard deviations, so the channel and the harness behave as modeled.
+That is a self-check, not a finding about the firmware: under independent bit errors, the share of frames that survive depends only on *p* and the frame length, and every build sends the same 45-byte frame.
+What it does show is how steep the curve is for a frame with no forward error correction of its own: at *p* = 0.001, 30% of frames are lost.
+
+#### Undetected corruption
+
+The integrity run corrupted 973140 of 1000000 frames, and 10 of those were accepted: about 1 in 97314 corrupted frames.
+The advance bound was 27.409 (`lambda` = 973140 / 65536 = 14.849), so the row passes.
+The link sweep's *p* = 0.01 row accepted 2 corrupted frames, but it is not a second sample: both runs build frame *i* the same way from the same seed, so its 100000 frames are the integrity run's first 100000, and its 2 are among the 10.
+Undetected corruption was 0 at every lower BER point.
+Independent bit errors are the easy case for a CRC; real LoRa errors after demodulation arrive in bursts, which this run does not test.
+
+#### End-to-end record delivery
+
+| BER | `interrupt` accepted / queued | `interrupt` delivery | `duty_cycled` accepted / queued | `duty_cycled` delivery |
+|---|---|---|---|---|
+| 0 | 28412 / 1237597 | 0.022957 | 288 / 288 | 1.000000 |
+| 1e-06 | 28405 / 1237597 | 0.022952 | 288 / 288 | 1.000000 |
+| 1e-05 | 28296 / 1237597 | 0.022864 | 286 / 288 | 0.993056 |
+| 0.0001 | 27379 / 1237597 | 0.022123 | 277 / 288 | 0.961806 |
+| 0.0003 | 25537 / 1237597 | 0.020634 | 254 / 288 | 0.881944 |
+| 0.001 | 19742 / 1237597 | 0.015952 | 191 / 288 | 0.663194 |
+| 0.003 | 9601 / 1237597 | 0.007758 | 87 / 288 | 0.302083 |
+| 0.01 | 772 / 1237597 | 0.000624 | 8 / 288 | 0.027778 |
+
+The gap between the builds is queue policy and reporting rate, not the channel.
+`interrupt` queues a record for every fix, 1237597 in 24 hours, and can transmit only about one SF12 packet every 3 s, so even on a clean channel it delivers 2.3% of what it queued; its 8-deep queue discards almost all of the rest, and up to 8 are still queued when the run ends.
+`duty_cycled` queues one record per 5-minute slot, 288 a day, and on a clean channel delivers all of them.
+Neither number says one build is more reliable in general: `interrupt` still delivers about 99 times as many records per day (28412 against 288), because it reports continuously and `duty_cycled` reports every 5 minutes by design.
+
+Once the channel is noisy, these rows are not an independent check on the link sweep.
+Every channel in this tool starts from the same frozen seed, and its draws depend only on *p* and the frame length, never on the frame's contents, so the *k*-th frame a build transmits gets exactly the error pattern of link-sweep frame *k*.
+The end-to-end rows therefore reuse the link sweep's error patterns: `duty_cycled`'s 191 of 288 at *p* = 0.001 is the error-free share of the first 288 of those patterns, not a fresh sample.
+What the rows do show is that every transmitted frame crosses the channel exactly once, with no retransmission; `test_hil` asserts that each end-to-end run's channel passes equal its radio's frames sent.
+At *p* = 0.001, `interrupt` delivered 19742 of the 28412 packets it delivered on a clean channel (0.695), and `duty_cycled` 191 of 288 (0.663), against an expected link ratio of 0.698.
+For a node reporting every 5 minutes with no retransmission, a post-demodulation BER of 0.001 means about 30% of reports are lost (1 - 0.698); this run does not measure what that does to downtime.
+
 ## Known limitations
 
 Milestone 1's polling loop blocked on the IMU and on radio transmission.
@@ -696,6 +853,15 @@ In `node_polling`, `TeensyRadio::transmit()` gives up after its 5000 ms `waitPac
 - **`boot_count` resets whenever SNVS loses power.** The board has no coin cell, so a battery swap clears `SNVS_LPGPR3` and the node starts again at `boot_count` 1.
   It then reuses dedup keys `(node_id, boot_count, seq)` it has already sent, and a gateway still holding them could discard its first packets.
 
+### Milestone 4 link regression
+
+- **Bit errors are independent.** Real LoRa errors after demodulation arrive in bursts, which are harder on a CRC; the undetected-corruption figure is for the easy case.
+- **LoRa's own coding rate and interleaving are not modeled.** *p* is the post-demodulation bit-error rate the firmware sees, set as an input, not a raw channel figure and not a measurement.
+- **The board target is not built.** The design doc's "Target contract" says what a Teensy node plus the gateway over USB serial must report to feed the same output; nothing in this repository does it yet.
+- **The fault group repeats milestone 3.** Its 3 of 5 and 5 of 5 were published before this tool existed.
+- **Run time.** `test_hil` took 37.9 s in the committed run.
+  The whole native suite took about 73 to 78 s in the runs recorded on the development machine; that range is machine-specific and not a committed artifact, and CI runs all of it on every push.
+
 ### Not validated on hardware
 
 No board has been available for milestones 2 or 3.
@@ -732,8 +898,9 @@ Specifically unverified:
 - **Host HAL trace replay.** The design spec calls for a host HAL implementation that replays recorded sensor traces from disk.
   What shipped instead is the header-only synthetic fakes under `test/support/`, which repeat one hardcoded NMEA sentence at a fixed byte rate.
   That substitution is a reasonable milestone-1 choice, sufficient for the timing-driven tests this milestone needs, but it is not what the spec describes.
-  Recorded-trace replay is planned to arrive with the hardware-in-the-loop tooling in milestone 4.
+  Milestone 4's link regression tool did not add recorded-trace replay, so it remains deferred.
 - **Hardware-in-the-loop validation** of everything listed in [Not validated on hardware](#not-validated-on-hardware), starting with whether WDOG1 counts through `deepSleep`.
+- **The board target for the link regression tool.** A Teensy node and a gateway, with a host script reading the gateway's `REC` lines over USB serial, optionally with attenuators in the link, per the milestone 4 design doc's "Target contract".
 
 ## Hardware
 

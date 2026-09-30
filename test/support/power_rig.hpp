@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <memory>
 #include <vector>
@@ -20,6 +21,7 @@
 #include "fake_radio.hpp"
 #include "fake_watchdog.hpp"
 #include "hang_breaker.hpp"
+#include "noisy_channel.hpp"
 #include "sampler_interrupt.hpp"
 #include "sim_clock.hpp"
 
@@ -38,6 +40,9 @@ const uint32_t kRigImuReadMs = 10;
 const uint32_t kRigRadioSf12Ms = 3023;
 const uint16_t kRigNodeId = 0x0042;
 const uint8_t kRigTtl = 3;
+
+/// FakeRadio keeps at most 64 payload bytes, so a channel copy never needs more.
+const size_t kRigMaxFrame = 64;
 
 /// Ends a hang when the run ends: for the build that has no watchdog.
 class ScenarioEnd : public IHangBreaker {
@@ -71,7 +76,9 @@ class PowerRig {
           end_(clock_),
           dedup_(),
           last_sent_(0),
-          reboots_(0) {
+          reboots_(0),
+          channel_(nullptr),
+          queued_before_boot_(0) {
         // FakePower first: each tick is charged at the state it began in.
         clock_.add_observer(&power_);
         clock_.add_observer(&gps_);
@@ -139,6 +146,18 @@ class PowerRig {
     const std::vector<GatewayRecord> &records() const { return records_; }
     size_t reboots() const { return reboots_; }
 
+    /// Puts `channel` between the node's radio and the gateway's decode.
+    /// nullptr, the default, is no channel: the delivery path is then exactly
+    /// the milestone 3 path.
+    void set_channel(NoisyChannel *channel) { channel_ = channel; }
+
+    /// Sequence numbers the node issued, summed over every boot: every record
+    /// it queued for transmission, whether or not it was ever sent.
+    uint32_t records_queued() const {
+        const uint32_t current = node_ ? node_->sampler().next_seq() : sampler_->next_seq();
+        return queued_before_boot_ + current;
+    }
+
     /// Scheduled faults, in add_fault() order, and whether each has begun.
     /// A run that never reached a fault's start did not measure that fault.
     size_t fault_count() const { return faults_.size(); }
@@ -171,6 +190,7 @@ class PowerRig {
     /// peripherals keep their state, and WDOG1 is disabled until begin().
     void reboot() {
         ++reboots_;
+        queued_before_boot_ += node_->sampler().next_seq();
         node_.reset();
         watchdog_.on_mcu_reset();
         boot();
@@ -182,7 +202,18 @@ class PowerRig {
         }
         last_sent_ = radio_.sent_count();
         Packet packet;
-        if (!decode_packet(radio_.last_payload(), radio_.last_length(), &packet)) {
+        const uint8_t *payload = radio_.last_payload();
+        size_t length = radio_.last_length();
+        uint8_t received[kRigMaxFrame];
+        if (channel_ != nullptr) {
+            if (length > kRigMaxFrame) {
+                length = kRigMaxFrame;
+            }
+            memcpy(received, payload, length);
+            channel_->corrupt(received, length);
+            payload = received;
+        }
+        if (!decode_packet(payload, length, &packet)) {
             return;
         }
         // The gateway's own dedup, so a key bug would show up as lost records.
@@ -262,6 +293,8 @@ class PowerRig {
     std::vector<GatewayRecord> records_;
     size_t last_sent_;
     size_t reboots_;
+    NoisyChannel *channel_;
+    uint32_t queued_before_boot_;
 };
 
 }  // namespace floodnet

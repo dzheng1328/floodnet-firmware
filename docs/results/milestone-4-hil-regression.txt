@@ -1,0 +1,179 @@
+********************************************************************************
+Obsolete PIO Core v6.1.18 is used (previous was 6.2.0)
+Please remove multiple PIO Cores from a system:
+https://docs.platformio.org/en/latest/core/installation/troubleshooting.html
+********************************************************************************
+Collected 21 tests (test_benchmark, test_downtime, test_duty_cycled, test_fakes, test_fault_evidence, test_hil, test_hil_criteria, test_interrupt, test_mesh, test_nmea, test_node_state, test_noisy_channel, test_packet, test_packet_queue, test_pairing, test_polling, test_power_bench, test_rig_channel, test_ring_buffer, test_sample, test_ubx)
+
+Processing test_hil in native environment
+--------------------------------------------------------------------------------
+Building...
+
+
+Testing...
+LINK,0,100000,100000,100000.0,1.000000,1.000000,0,1
+LINK,1e-06,100000,99973,99964.0,0.999730,0.999640,0,1
+LINK,1e-05,100000,99601,99640.6,0.996010,0.996406,0,1
+LINK,0.0001,100000,96426,96463.9,0.964260,0.964639,0,1
+LINK,0.0003,100000,89823,89761.3,0.898230,0.897613,0,1
+LINK,0.001,100000,69617,69755.1,0.696170,0.697551,0,1
+LINK,0.003,100000,33778,33904.5,0.337780,0.339045,0,1
+LINK,0.01,100000,2741,2683.3,0.027410,0.026833,2,1
+test/test_hil/test_main.cpp:139:test_link_group:PASS
+INTEGRITY,0.01,1000000,973140,10,27.409,1
+test/test_hil/test_main.cpp:140:test_integrity_group:PASS
+TRANSPARENT,interrupt,28412,28412,1,1
+TRANSPARENT,duty_cycled,288,288,1,1
+test/test_hil/test_main.cpp:141:test_transparency_group:PASS
+FAULT,interrupt,fault_lost_completion,1,1
+FAULT,interrupt,fault_sky_blockage,1,1
+FAULT,interrupt,fault_imu_failing,1,1
+FAULT,interrupt,fault_radio_wedge,0,0
+FAULT,interrupt,fault_hang,0,0
+FAULT,duty_cycled,fault_lost_completion,1,1
+FAULT,duty_cycled,fault_sky_blockage,1,1
+FAULT,duty_cycled,fault_imu_failing,1,1
+FAULT,duty_cycled,fault_radio_wedge,1,1
+FAULT,duty_cycled,fault_hang,1,1
+test/test_hil/test_main.cpp:142:test_fault_group:PASS
+E2E,interrupt,0,1237597,28412,0.022957
+E2E,interrupt,1e-06,1237597,28405,0.022952
+E2E,interrupt,1e-05,1237597,28296,0.022864
+E2E,interrupt,0.0001,1237597,27379,0.022123
+E2E,interrupt,0.0003,1237597,25537,0.020634
+E2E,interrupt,0.001,1237597,19742,0.015952
+E2E,interrupt,0.003,1237597,9601,0.007758
+E2E,interrupt,0.01,1237597,772,0.000624
+E2E,duty_cycled,0,288,288,1.000000
+E2E,duty_cycled,1e-06,288,288,1.000000
+E2E,duty_cycled,1e-05,288,286,0.993056
+E2E,duty_cycled,0.0001,288,277,0.961806
+E2E,duty_cycled,0.0003,288,254,0.881944
+E2E,duty_cycled,0.001,288,191,0.663194
+E2E,duty_cycled,0.003,288,87,0.302083
+E2E,duty_cycled,0.01,288,8,0.027778
+test/test_hil/test_main.cpp:143:test_e2e_group:PASS
+REG,link,-,8,8
+REG,integrity,-,1,1
+REG,transparency,interrupt,1,1
+REG,fault,interrupt,3,5
+REG,transparency,duty_cycled,1,1
+REG,fault,duty_cycled,5,5
+REG,all,-,19,21
+test/test_hil/test_main.cpp:144:test_summary:PASS
+
+-----------------------
+6 Tests 0 Failures 0 Ignored 
+OK
+
+----------------- native:test_hil [PASSED] Took 37.91 seconds -----------------
+
+=================================== SUMMARY ===================================
+Environment       Test                 Status    Duration
+----------------  -------------------  --------  ------------
+node_polling      test_downtime        SKIPPED
+node_polling      test_polling         SKIPPED
+node_polling      test_hil_criteria    SKIPPED
+node_polling      test_pairing         SKIPPED
+node_polling      test_ring_buffer     SKIPPED
+node_polling      test_power_bench     SKIPPED
+node_polling      test_fakes           SKIPPED
+node_polling      test_benchmark       SKIPPED
+node_polling      test_duty_cycled     SKIPPED
+node_polling      test_mesh            SKIPPED
+node_polling      test_rig_channel     SKIPPED
+node_polling      test_hil             SKIPPED
+node_polling      test_node_state      SKIPPED
+node_polling      test_packet          SKIPPED
+node_polling      test_nmea            SKIPPED
+node_polling      test_ubx             SKIPPED
+node_polling      test_packet_queue    SKIPPED
+node_polling      test_noisy_channel   SKIPPED
+node_polling      test_interrupt       SKIPPED
+node_polling      test_sample          SKIPPED
+node_polling      test_fault_evidence  SKIPPED
+node_interrupt    test_downtime        SKIPPED
+node_interrupt    test_polling         SKIPPED
+node_interrupt    test_hil_criteria    SKIPPED
+node_interrupt    test_pairing         SKIPPED
+node_interrupt    test_ring_buffer     SKIPPED
+node_interrupt    test_power_bench     SKIPPED
+node_interrupt    test_fakes           SKIPPED
+node_interrupt    test_benchmark       SKIPPED
+node_interrupt    test_duty_cycled     SKIPPED
+node_interrupt    test_mesh            SKIPPED
+node_interrupt    test_rig_channel     SKIPPED
+node_interrupt    test_hil             SKIPPED
+node_interrupt    test_node_state      SKIPPED
+node_interrupt    test_packet          SKIPPED
+node_interrupt    test_nmea            SKIPPED
+node_interrupt    test_ubx             SKIPPED
+node_interrupt    test_packet_queue    SKIPPED
+node_interrupt    test_noisy_channel   SKIPPED
+node_interrupt    test_interrupt       SKIPPED
+node_interrupt    test_sample          SKIPPED
+node_interrupt    test_fault_evidence  SKIPPED
+node_duty_cycled  test_downtime        SKIPPED
+node_duty_cycled  test_polling         SKIPPED
+node_duty_cycled  test_hil_criteria    SKIPPED
+node_duty_cycled  test_pairing         SKIPPED
+node_duty_cycled  test_ring_buffer     SKIPPED
+node_duty_cycled  test_power_bench     SKIPPED
+node_duty_cycled  test_fakes           SKIPPED
+node_duty_cycled  test_benchmark       SKIPPED
+node_duty_cycled  test_duty_cycled     SKIPPED
+node_duty_cycled  test_mesh            SKIPPED
+node_duty_cycled  test_rig_channel     SKIPPED
+node_duty_cycled  test_hil             SKIPPED
+node_duty_cycled  test_node_state      SKIPPED
+node_duty_cycled  test_packet          SKIPPED
+node_duty_cycled  test_nmea            SKIPPED
+node_duty_cycled  test_ubx             SKIPPED
+node_duty_cycled  test_packet_queue    SKIPPED
+node_duty_cycled  test_noisy_channel   SKIPPED
+node_duty_cycled  test_interrupt       SKIPPED
+node_duty_cycled  test_sample          SKIPPED
+node_duty_cycled  test_fault_evidence  SKIPPED
+gateway           test_downtime        SKIPPED
+gateway           test_polling         SKIPPED
+gateway           test_hil_criteria    SKIPPED
+gateway           test_pairing         SKIPPED
+gateway           test_ring_buffer     SKIPPED
+gateway           test_power_bench     SKIPPED
+gateway           test_fakes           SKIPPED
+gateway           test_benchmark       SKIPPED
+gateway           test_duty_cycled     SKIPPED
+gateway           test_mesh            SKIPPED
+gateway           test_rig_channel     SKIPPED
+gateway           test_hil             SKIPPED
+gateway           test_node_state      SKIPPED
+gateway           test_packet          SKIPPED
+gateway           test_nmea            SKIPPED
+gateway           test_ubx             SKIPPED
+gateway           test_packet_queue    SKIPPED
+gateway           test_noisy_channel   SKIPPED
+gateway           test_interrupt       SKIPPED
+gateway           test_sample          SKIPPED
+gateway           test_fault_evidence  SKIPPED
+native            test_downtime        SKIPPED
+native            test_polling         SKIPPED
+native            test_hil_criteria    SKIPPED
+native            test_pairing         SKIPPED
+native            test_ring_buffer     SKIPPED
+native            test_power_bench     SKIPPED
+native            test_fakes           SKIPPED
+native            test_benchmark       SKIPPED
+native            test_duty_cycled     SKIPPED
+native            test_mesh            SKIPPED
+native            test_rig_channel     SKIPPED
+native            test_hil             PASSED    00:00:37.912
+native            test_node_state      SKIPPED
+native            test_packet          SKIPPED
+native            test_nmea            SKIPPED
+native            test_ubx             SKIPPED
+native            test_packet_queue    SKIPPED
+native            test_noisy_channel   SKIPPED
+native            test_interrupt       SKIPPED
+native            test_sample          SKIPPED
+native            test_fault_evidence  SKIPPED
+================== 6 test cases: 6 succeeded in 00:00:37.912 ==================
