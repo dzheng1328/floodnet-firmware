@@ -71,9 +71,27 @@ void test_every_little_endian_miss_straddles_the_crc_boundary(void) {
     TEST_ASSERT_EQUAL_UINT64(r.crc_undetected, g_straddling);
 }
 
+// The first miss the exhaustive check finds, spanning bits 341 to 353 on
+// the air. Read in the CRC's bit order, byte 42 then the high byte (44) then
+// the low byte (43), it is x^2 times the CRC polynomial 0x11021.
+void test_first_miss_is_the_crc_polynomial_in_crc_order(void) {
+    uint8_t sent[PACKET_SIZE];
+    build_link_frame(0, sent);
+    uint8_t errors[PACKET_SIZE];
+    memset(errors, 0, sizeof errors);
+    errors[42] = 0x04;
+    errors[43] = 0x84;
+    errors[44] = 0x40;
+    TEST_ASSERT_TRUE(pattern_undetected(sent, errors));
+    const uint32_t crc_order =
+        (static_cast<uint32_t>(errors[42]) << 16) | (static_cast<uint32_t>(errors[44]) << 8) | errors[43];
+    TEST_ASSERT_EQUAL_HEX32(0x11021u << 2, crc_order);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_big_endian_crc_catches_every_short_burst);
     RUN_TEST(test_every_little_endian_miss_straddles_the_crc_boundary);
+    RUN_TEST(test_first_miss_is_the_crc_polynomial_in_crc_order);
     return UNITY_END();
 }

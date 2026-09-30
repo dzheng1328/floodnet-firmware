@@ -19,6 +19,8 @@ Milestone 5 adds the board target for that tool: the node prints a `TX` line for
 It is tested against simulated transcripts from the same host simulation and agrees with the simulation's own counts exactly; see [Milestone 5: board target](#milestone-5-board-target).
 It makes no new measurements: the first real figures need two boards and one `capture` run.
 
+Milestone 6 tests the CRC and the link under burst bit errors within a frame, host-side: 2 of 3 graded rows pass, and the one that fails is a finding, that storing the CRC low byte first lets 12 of 524 288 short bursts touching the CRC bytes through; see [Milestone 6: burst bit errors](#milestone-6-burst-bit-errors).
+
 There are three node build targets, and all three remain selectable so every comparison stays reproducible:
 
 | Target | What it is | Wire version |
@@ -817,6 +819,131 @@ The `interrupt` rows' large `seq_gaps` (49998 in the clean hour) are its queue d
 The lost-confirmation run shows the timeout as `tx_timeout` 1 and one sequence gap.
 The hang run shows no gap because the hang struck before a record was queued, so nothing was lost: the first boot sent sequence numbers 0 to 23 and the second 0 to 263.
 
+### Milestone 6: burst bit errors
+
+Milestone 4 applied independent bit errors, the easy case for a CRC.
+Milestone 6 applies bursts, within a single frame, and checks the CRC against them.
+It is host-side and simulated, like milestone 4, whose tool, rows and committed output it leaves unchanged.
+Every constant, sample size and pass criterion was frozen in [the milestone 6 design doc](docs/superpowers/specs/2026-09-30-milestone-6-burst-errors-design.md) before any of its code existed.
+The first complete run is committed unchanged as [docs/results/milestone-6-burst-errors.txt](docs/results/milestone-6-burst-errors.txt), and every line below is copied from it.
+
+#### The channel
+
+`BurstChannel` in `test/support/burst_channel.hpp` is a two-state Gilbert channel.
+In the good state no bit flips; in the bad state each bit flips with probability 0.5.
+The mean length of a bad-state run is *L* bits, and the rate of entering the bad state is set so that the average bit-error rate is *p*, the same *p* as milestone 4.
+Each frame starts in the bad state with the long-run probability 2*p*, and no state carries over from one frame to the next, so every bit of every frame flips with probability exactly *p* and no burst crosses a frame boundary.
+*L* is the mean bad-state run, not the span of the resulting error pattern, because only about half of a run's bits flip.
+As in milestone 4, *p* is the post-demodulation bit-error rate the firmware sees, set as an input, not measured.
+
+#### A property of the wire format
+
+`crc16_ccitt()` in `lib/floodnet_core/src/packet.cpp` processes each byte most significant bit first, which is the bit order in which a 16-bit polynomial code is guaranteed to catch every error burst of 16 bits or fewer.
+`encode_packet()` and `encode_packet_v2()` store the CRC with `put_u16()`, low byte first, and the air carries bytes in order.
+So on the air, the CRC's two bytes are swapped relative to the order the guarantee assumes.
+The design doc named this before the first run and fixed in advance what a failure would mean; the exhaustive check below found that it does let some short bursts through.
+
+#### Raw output
+
+```text
+BURST_LINK,1e-06,2,100000,99974,0.999740,0.999640,26,0
+BURST_LINK,1e-06,4,100000,99987,0.999870,0.999640,13,0
+BURST_LINK,1e-06,8,100000,99990,0.999900,0.999640,10,0
+BURST_LINK,1e-06,16,100000,99997,0.999970,0.999640,3,0
+BURST_LINK,1e-06,32,100000,99999,0.999990,0.999640,1,0
+BURST_LINK,1e-05,2,100000,99730,0.997300,0.996406,270,0
+BURST_LINK,1e-05,4,100000,99844,0.998440,0.996406,156,0
+BURST_LINK,1e-05,8,100000,99916,0.999160,0.996406,84,0
+BURST_LINK,1e-05,16,100000,99956,0.999560,0.996406,44,0
+BURST_LINK,1e-05,32,100000,99979,0.999790,0.996406,21,0
+BURST_LINK,0.0001,2,100000,97628,0.976280,0.964639,2372,0
+BURST_LINK,0.0001,4,100000,98569,0.985690,0.964639,1431,0
+BURST_LINK,0.0001,8,100000,99137,0.991370,0.964639,863,0
+BURST_LINK,0.0001,16,100000,99527,0.995270,0.964639,473,0
+BURST_LINK,0.0001,32,100000,99743,0.997430,0.964639,257,0
+BURST_LINK,0.0003,2,100000,93050,0.930500,0.897613,6950,0
+BURST_LINK,0.0003,4,100000,95759,0.957590,0.897613,4241,0
+BURST_LINK,0.0003,8,100000,97531,0.975310,0.897613,2469,0
+BURST_LINK,0.0003,16,100000,98663,0.986630,0.897613,1337,0
+BURST_LINK,0.0003,32,100000,99257,0.992570,0.897613,743,0
+BURST_LINK,0.001,2,100000,78490,0.784900,0.697551,21510,0
+BURST_LINK,0.001,4,100000,86401,0.864010,0.697551,13599,0
+BURST_LINK,0.001,8,100000,92150,0.921500,0.697551,7850,0
+BURST_LINK,0.001,16,100000,95661,0.956610,0.697551,4339,0
+BURST_LINK,0.001,32,100000,97633,0.976330,0.697551,2368,1
+BURST_LINK,0.003,2,100000,48163,0.481630,0.339045,51837,0
+BURST_LINK,0.003,4,100000,64680,0.646800,0.339045,35321,1
+BURST_LINK,0.003,8,100000,77884,0.778840,0.339045,22116,0
+BURST_LINK,0.003,16,100000,87522,0.875220,0.339045,12478,0
+BURST_LINK,0.003,32,100000,93019,0.930190,0.339045,6981,0
+BURST_LINK,0.01,2,100000,8689,0.086890,0.026833,91312,1
+BURST_LINK,0.01,4,100000,22478,0.224780,0.026833,77522,0
+BURST_LINK,0.01,8,100000,43703,0.437030,0.026833,56297,0
+BURST_LINK,0.01,16,100000,63799,0.637990,0.026833,36201,0
+BURST_LINK,0.01,32,100000,78453,0.784530,0.026833,21547,0
+BURST_EXHAUSTIVE,data,10813439,0,1
+BURST_EXHAUSTIVE,crc_field,524288,12,0
+BURST_INTEGRITY,0.01,32,1000000,214642,6,9.704,1
+BURST_REG,all,-,2,3
+```
+
+The line formats are:
+
+```text
+BURST_LINK,ber,L,frames,accepted,ratio,independent_ratio,corrupted,undetected
+BURST_EXHAUSTIVE,region,patterns,undetected,pass
+BURST_INTEGRITY,ber,L,frames,corrupted,undetected,bound,pass
+BURST_REG,group,build,passed,total
+```
+
+#### Exhaustive short-burst check
+
+Every error pattern whose span, first flipped bit to last, is 16 bits or fewer was applied at every position of a v0x02 frame and given to the real `decode_packet()`: 11 337 727 patterns, no random draws.
+
+| Region | Patterns | Undetected | Pass |
+|---|---|---|---|
+| `data`: every flipped bit in bytes 0 to 42 | 10813439 | 0 | yes |
+| `crc_field`: at least one flipped bit in bytes 43 or 44 | 524288 | 12 | no |
+
+The `data` row confirms the guarantee where it applies.
+The `crc_field` row fails: 12 bursts of 16 bits or fewer that touch the CRC bytes were accepted as valid frames.
+`test/test_crc_byte_order/` pins the cause.
+Every one of the 12 straddles byte 42 and the CRC bytes, and the same frame with its CRC stored high byte first misses none of the 11 337 727 patterns.
+Read in the CRC's own bit order, byte 42 then the high byte then the low byte, each miss is the CRC polynomial shifted: the first has error bytes 42, 43 and 44 of `04 84 40`, which in that order is `04 40 84`, x^18 + x^14 + x^7 + x^2 = x^2 (x^16 + x^12 + x^5 + 1).
+It spans 13 bits on the air and 17 in the CRC's order, outside what the guarantee covers.
+
+The fix is to send the CRC high byte first.
+That changes the wire format, so it is a proposal for a future packet version and was not made here; the row stays failed.
+
+#### Burst link sweep
+
+Share of 100 000 frames accepted, next to the independent-error ratio `(1 - p)^360` at the same average BER:
+
+| BER | Independent | L = 2 | L = 4 | L = 8 | L = 16 | L = 32 |
+|---|---|---|---|---|---|---|
+| 1e-06 | 0.999640 | 0.999740 | 0.999870 | 0.999900 | 0.999970 | 0.999990 |
+| 1e-05 | 0.996406 | 0.997300 | 0.998440 | 0.999160 | 0.999560 | 0.999790 |
+| 0.0001 | 0.964639 | 0.976280 | 0.985690 | 0.991370 | 0.995270 | 0.997430 |
+| 0.0003 | 0.897613 | 0.930500 | 0.957590 | 0.975310 | 0.986630 | 0.992570 |
+| 0.001 | 0.697551 | 0.784900 | 0.864010 | 0.921500 | 0.956610 | 0.976330 |
+| 0.003 | 0.339045 | 0.481630 | 0.646800 | 0.778840 | 0.875220 | 0.930190 |
+| 0.01 | 0.026833 | 0.086890 | 0.224780 | 0.437030 | 0.637990 | 0.784530 |
+
+These rows are reported, not graded.
+At every point, clustering the same average number of bit errors into bursts corrupts fewer frames, so more survive: at *p* = 0.001, 0.976330 of frames survive with *L* = 32 against 0.697551 with independent errors.
+Undetected corruption was 0 in every row except *p* = 0.001, *L* = 32, *p* = 0.003, *L* = 4, *p* = 0.01, *L* = 2, which had 1 each.
+Every row starts its channel from milestone 4's frozen seed, so the rows share their random draws and are not independent samples of one another.
+
+#### Burst integrity run
+
+1 000 000 frames at *p* = 0.01, *L* = 32 corrupted 214642, and 6 of those were accepted.
+Milestone 4's frozen bound for that many corrupted frames is 9.704 (`lambda` = 214642 / 65536 = 3.275), so the row passes.
+
+#### Regression
+
+`BURST_REG,all,-,2,3`: the `data` and integrity rows pass and `crc_field` fails.
+This is separate from milestone 4's 19 of 21, which it does not change.
+
 ## Known limitations
 
 Milestone 1's polling loop blocked on the IMU and on radio transmission.
@@ -936,7 +1063,7 @@ In `node_polling`, `TeensyRadio::transmit()` gives up after its 5000 ms `waitPac
 
 ### Milestone 4 link regression
 
-- **Bit errors are independent.** Real LoRa errors after demodulation arrive in bursts, which are harder on a CRC; the undetected-corruption figure is for the easy case.
+- **Bit errors are independent.** The undetected-corruption figure is for that easy case; milestone 6 tests bursts within a frame, see [Milestone 6: burst bit errors](#milestone-6-burst-bit-errors).
 - **LoRa's own coding rate and interleaving are not modeled.** *p* is the post-demodulation bit-error rate the firmware sees, set as an input, not a raw channel figure and not a measurement.
 - **The board target is built but has not run on a board.** Milestone 5 built it against the design doc's "Target contract"; see [Milestone 5: board target](#milestone-5-board-target).
 - **The fault group repeats milestone 3.** Its 3 of 5 and 5 of 5 were published before this tool existed.
@@ -954,6 +1081,15 @@ In `node_polling`, `TeensyRadio::transmit()` gives up after its 5000 ms `waitPac
 - **USB serial across the Teensy's deep sleep is unverified.** The node calls `Serial.flush()` before `Snooze.deepSleep`, but Snooze's own example uses its `SnoozeUSBSerial` driver to keep USB serial working across sleep; a `TX` line printed just before sleep may be delayed or lost, and the first bench capture should compare `tx_ok` with the gateway's `REC` count to find out.
 - **`capture` reopens a port that drops,** as a reset makes the Teensy leave and rejoin USB, but only against fake ports in its tests.
 - **`node_polling` prints no `TX` line.**
+
+### Milestone 6 burst errors
+
+- **One burst model.** A Gilbert channel with a bad-state flip probability of 0.5 is one model among many; the results are for this model, not for LoRa.
+- **No burst crosses a frame.** The channel resets at every frame by construction, so fades that take out consecutive reports are not tested.
+- **The exhaustive check uses one frame.** The CRC is linear, so whether a pattern is caught does not depend on the frame's contents, but the check does not show that by running other frames.
+- **The channel's bit order within a byte is not pinned by a test.** Every per-position flip rate is the same either way; the expression is copied from `NoisyChannel`, so the order is shared by inspection.
+- **The CRC byte order is unchanged.** The `crc_field` failure is published, not fixed; the fix is a wire format change.
+- **Run time.** `test_hil_burst` took 24.24 s in the committed run, and `test_crc_byte_order` 27.66 s in one run on the development machine; CI runs both on every push.
 
 ### Not validated on hardware
 

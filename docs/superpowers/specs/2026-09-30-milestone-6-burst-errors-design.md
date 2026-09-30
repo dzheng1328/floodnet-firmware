@@ -1,7 +1,7 @@
 # FloodNet Milestone 6: Burst Bit Errors
 
 Date: 2026-09-30
-Status: design approved, not implemented
+Status: implemented
 Parent spec: `docs/superpowers/specs/2026-09-20-floodnet-firmware-design.md`
 Previous milestone: `docs/superpowers/specs/2026-09-30-milestone-5-board-target-design.md`
 Extends: `docs/superpowers/specs/2026-09-30-milestone-4-hil-regression-design.md`
@@ -155,4 +155,7 @@ The first complete run is saved unchanged as `docs/results/milestone-6-burst-err
 
 ## Revisions
 
-None yet.
+None changes a sweep point, sample size, seed or pass criterion.
+
+- **2026-09-30: a replacement deliberate-break check, before the kept run.** The plan's check of shifting the link frame index could not fail: whether a frame is accepted, and whether the CRC misses a corruption, does not depend on the frame's contents. The pin on milestone 4's rows is instead shown to fail on a changed seed.
+- **2026-09-30: `test/test_crc_byte_order/`, after the kept run.** The `crc_field` row failed with 12, and the README had to explain it from a committed test. The new test pins that every miss straddles byte 42 and the CRC bytes, that the same frame with its CRC stored high byte first misses none of the 11 337 727 patterns, and that the first miss is x^2 times the CRC polynomial in the CRC's bit order. It reads the kept run; it does not change it, and the runner's `BURST_` lines were checked byte-identical after the enumerator was made to take its per-pattern check as a parameter.
