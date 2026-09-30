@@ -17,8 +17,8 @@ void tearDown(void) {}
 // significant bit first, but put_u16() stores the CRC low byte first, so on
 // the air the two CRC bytes are swapped relative to the order the burst
 // guarantee assumes. These tests pin that cause: every missed short burst
-// straddles the data/CRC boundary, and the same frame with its CRC stored
-// high byte first misses none.
+// starts in the data bytes and ends in the CRC bytes, and the same frame
+// with its CRC stored high byte first misses none.
 
 static uint8_t g_sent[PACKET_SIZE];
 
@@ -88,10 +88,72 @@ void test_first_miss_is_the_crc_polynomial_in_crc_order(void) {
     TEST_ASSERT_EQUAL_HEX32(0x11021u << 2, crc_order);
 }
 
+// The error pattern in the CRC's own bit order: bytes 0 to 42 as sent, then
+// the CRC high byte (44), then the low byte (43). Returns the remainder of
+// that polynomial divided by the CRC polynomial 0x11021; a CRC misses an
+// error exactly when this is 0.
+static uint16_t crc_order_remainder(const uint8_t *errors) {
+    uint8_t ordered[PACKET_SIZE];
+    memcpy(ordered, errors, 43);
+    ordered[43] = errors[44];
+    ordered[44] = errors[43];
+    uint32_t rem = 0;
+    for (size_t i = 0; i < PACKET_SIZE * 8; ++i) {
+        rem = (rem << 1) | ((ordered[i / 8] >> (7 - i % 8)) & 1u);
+        if (rem & 0x10000u) {
+            rem ^= 0x11021u;
+        }
+    }
+    return static_cast<uint16_t>(rem);
+}
+
+/// True when the pattern, in CRC order, is exactly x^k times 0x11021.
+static bool is_shifted_polynomial(const uint8_t *errors) {
+    uint8_t ordered[PACKET_SIZE];
+    memcpy(ordered, errors, 43);
+    ordered[43] = errors[44];
+    ordered[44] = errors[43];
+    size_t set[8];
+    size_t n = 0;
+    for (size_t i = 0; i < PACKET_SIZE * 8; ++i) {
+        if ((ordered[i / 8] >> (7 - i % 8)) & 1u) {
+            if (n == 8) {
+                return false;
+            }
+            set[n++] = i;
+        }
+    }
+    return n == 4 && set[1] - set[0] == 4 && set[2] - set[0] == 11 && set[3] - set[0] == 16;
+}
+
+static unsigned g_multiples = 0;
+static unsigned g_shifts = 0;
+
+// Undetected means, for a CRC, that the error is a multiple of its
+// polynomial in the CRC's bit order. Only some of the misses are the
+// polynomial merely shifted; the rest are other multiples of it.
+void test_every_little_endian_miss_is_a_multiple_of_the_polynomial(void) {
+    build_link_frame(0, g_sent);
+    g_multiples = 0;
+    g_shifts = 0;
+    const ExhaustiveResult r = for_each_short_burst([](const uint8_t *errors, size_t, size_t) {
+        const bool missed = pattern_undetected(g_sent, errors);
+        if (missed) {
+            g_multiples += crc_order_remainder(errors) == 0 ? 1 : 0;
+            g_shifts += is_shifted_polynomial(errors) ? 1 : 0;
+        }
+        return missed;
+    });
+    TEST_ASSERT_EQUAL_UINT64(12, r.crc_undetected);
+    TEST_ASSERT_EQUAL_UINT32(12, g_multiples);
+    TEST_ASSERT_EQUAL_UINT32(3, g_shifts);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_big_endian_crc_catches_every_short_burst);
     RUN_TEST(test_every_little_endian_miss_straddles_the_crc_boundary);
     RUN_TEST(test_first_miss_is_the_crc_polynomial_in_crc_order);
+    RUN_TEST(test_every_little_endian_miss_is_a_multiple_of_the_polynomial);
     return UNITY_END();
 }

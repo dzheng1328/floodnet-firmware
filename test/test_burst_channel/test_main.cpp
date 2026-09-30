@@ -169,6 +169,21 @@ void test_return_value_counts_flipped_bits(void) {
     }
 }
 
+// The good-to-bad probability s = (1/L) * 2p / (1 - 2p) is a probability
+// only while p <= L / (2 (L + 1)); beyond that the channel cannot hit p.
+void test_parameters_outside_the_domain_are_reported(void) {
+    TEST_ASSERT_TRUE(BurstChannel(0.01, 2.0, kChannelSeed).valid());
+    TEST_ASSERT_TRUE(BurstChannel(0.25, 4.0, kChannelSeed).valid());
+    TEST_ASSERT_TRUE(BurstChannel(0.5, 8.0, kChannelSeed).valid());
+    TEST_ASSERT_TRUE(BurstChannel(0.0, 1.0, kChannelSeed).valid());
+    TEST_ASSERT_TRUE(BurstChannel(1.0 / 3.0, 2.0, kChannelSeed).valid());
+    TEST_ASSERT_FALSE(BurstChannel(0.4, 2.0, kChannelSeed).valid());
+    TEST_ASSERT_FALSE(BurstChannel(0.4, 1.0, kChannelSeed).valid());
+    TEST_ASSERT_FALSE(BurstChannel(0.6, 8.0, kChannelSeed).valid());
+    TEST_ASSERT_FALSE(BurstChannel(-0.1, 8.0, kChannelSeed).valid());
+    TEST_ASSERT_FALSE(BurstChannel(0.01, 0.5, kChannelSeed).valid());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_zero_p_changes_nothing_and_draws_nothing);
@@ -179,5 +194,6 @@ int main(int, char **) {
     RUN_TEST(test_tiny_p_stays_bounded);
     RUN_TEST(test_same_seed_gives_same_flips);
     RUN_TEST(test_return_value_counts_flipped_bits);
+    RUN_TEST(test_parameters_outside_the_domain_are_reported);
     return UNITY_END();
 }

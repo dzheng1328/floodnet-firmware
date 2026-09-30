@@ -25,6 +25,7 @@ void test_burst_link_group(void) {
         for (size_t k = 0; k < kBurstLengthCount; ++k) {
             const double L = kBurstLengths[k];
             BurstChannel channel(p, L, kChannelSeed);
+            TEST_ASSERT_TRUE_MESSAGE(channel.valid(), "burst link point outside the channel's domain");
             const LinkResult r = run_link_with(channel, kBurstLinkFrames);
             TEST_ASSERT_EQUAL_UINT32(kBurstLinkFrames, r.frames);
             TEST_ASSERT_EQUAL_UINT64(kBurstLinkFrames, channel.frames());
@@ -68,6 +69,7 @@ void test_exhaustive_group(void) {
 
 void test_burst_integrity_group(void) {
     BurstChannel channel(kBurstIntegrityBer, kBurstIntegrityLength, kChannelSeed);
+    TEST_ASSERT_TRUE_MESSAGE(channel.valid(), "integrity point outside the channel's domain");
     const LinkResult r = run_link_with(channel, kBurstIntegrityFrames);
     TEST_ASSERT_EQUAL_UINT32(kBurstIntegrityFrames, r.frames);
     TEST_ASSERT_TRUE_MESSAGE(r.corrupted > 0, "integrity run corrupted nothing");

@@ -908,8 +908,9 @@ Every error pattern whose span, first flipped bit to last, is 16 bits or fewer w
 The `data` row confirms the guarantee where it applies.
 The `crc_field` row fails: 12 bursts of 16 bits or fewer that touch the CRC bytes were accepted as valid frames.
 `test/test_crc_byte_order/` pins the cause.
-Every one of the 12 straddles byte 42 and the CRC bytes, and the same frame with its CRC stored high byte first misses none of the 11 337 727 patterns.
-Read in the CRC's own bit order, byte 42 then the high byte then the low byte, each miss is the CRC polynomial shifted: the first has error bytes 42, 43 and 44 of `04 84 40`, which in that order is `04 40 84`, x^18 + x^14 + x^7 + x^2 = x^2 (x^16 + x^12 + x^5 + 1).
+Every one of the 12 starts in the data bytes and ends in the CRC bytes, and the same frame with its CRC stored high byte first misses none of the 11 337 727 patterns.
+A CRC misses an error exactly when the error, read in the CRC's own bit order (the data bytes, then the CRC high byte, then the low byte), is a multiple of the CRC polynomial x^16 + x^12 + x^5 + 1, and all 12 are; 3 of them are the polynomial merely shifted, and the other 9 are other multiples of it.
+The first, spanning bits 341 to 353, has error bytes 42, 43 and 44 of `04 84 40`, which in the CRC's order is `04 40 84`, x^18 + x^14 + x^7 + x^2 = x^2 (x^16 + x^12 + x^5 + 1).
 It spans 13 bits on the air and 17 in the CRC's order, outside what the guarantee covers.
 
 The fix is to send the CRC high byte first.
@@ -1089,7 +1090,7 @@ In `node_polling`, `TeensyRadio::transmit()` gives up after its 5000 ms `waitPac
 - **The exhaustive check uses one frame.** The CRC is linear, so whether a pattern is caught does not depend on the frame's contents, but the check does not show that by running other frames.
 - **The channel's bit order within a byte is not pinned by a test.** Every per-position flip rate is the same either way; the expression is copied from `NoisyChannel`, so the order is shared by inspection.
 - **The CRC byte order is unchanged.** The `crc_field` failure is published, not fixed; the fix is a wire format change.
-- **Run time.** `test_hil_burst` took 24.24 s in the committed run, and `test_crc_byte_order` 27.66 s in one run on the development machine; CI runs both on every push.
+- **Run time.** `test_hil_burst` took 24.24 s in the committed run; `test_crc_byte_order` repeats the exhaustive enumeration several times and is slower, and CI runs both on every push.
 
 ### Not validated on hardware
 

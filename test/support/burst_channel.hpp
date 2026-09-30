@@ -24,10 +24,13 @@ class BurstChannel {
   public:
     static constexpr double kBadFlip = 0.5;
 
-    /// `p` in [0, 0.5], the average bit-error rate; at 0.5 every bit is in
-    /// the bad state. `mean_burst_bits` is L, the mean bad-state run, >= 1.
+    /// `p` is the average bit-error rate and `mean_burst_bits` is L, the
+    /// mean bad-state run. The channel hits p only where valid() holds:
+    /// L >= 1 and 0 <= p <= L / (2 (L + 1)), or p = 0.5, where every bit is
+    /// in the bad state. Outside that, s would exceed 1.
     BurstChannel(double p, double mean_burst_bits, uint64_t seed)
         : p_(p),
+          mean_burst_bits_(mean_burst_bits),
           pi_bad_(p / kBadFlip),
           always_bad_(pi_bad_ >= 1.0),
           leave_bad_(1.0 / mean_burst_bits),
@@ -62,6 +65,13 @@ class BurstChannel {
             bad = false;
         }
         return flips;
+    }
+
+    /// Whether (p, L) lies in the domain where every bit flips with
+    /// probability exactly p.
+    bool valid() const {
+        return p_ >= 0.0 && p_ <= 0.5 && mean_burst_bits_ >= 1.0 &&
+               (always_bad_ || enter_bad_ <= 1.0);
     }
 
     uint64_t draws() const { return draws_; }
@@ -116,6 +126,7 @@ class BurstChannel {
     }
 
     double p_;
+    double mean_burst_bits_;
     double pi_bad_;
     bool always_bad_;
     double leave_bad_;
