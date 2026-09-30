@@ -18,9 +18,9 @@ struct GpsFix {
 /// A single IMU orientation sample, timestamped with the node's local clock.
 struct ImuSample {
     uint32_t time_ms = 0;
-    int16_t yaw_cd = 0;    ///< centidegrees
-    int16_t pitch_cd = 0;  ///< centidegrees
-    int16_t roll_cd = 0;   ///< centidegrees
+    int16_t yaw_cd = 0;    ///< centidegrees, [-18000, 18000); see bno055_euler_to_sample()
+    int16_t pitch_cd = 0;  ///< centidegrees, [-18000, 18000)
+    int16_t roll_cd = 0;   ///< centidegrees, [-18000, 18000)
     bool valid = false;
 };
 
