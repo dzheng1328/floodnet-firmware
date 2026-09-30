@@ -165,4 +165,11 @@ The cross-check fails, rather than skips, when the transcripts are missing, with
 
 ## Revisions
 
-None yet.
+Made while planning, before any code.
+
+- **2026-09-30: runs end quiet.** A transcript run could stop between the radio completing a frame (which the gateway sees) and the sampler observing it (which prints the `TX` line), leaving a `REC` with no `TX`.
+  Each transcript run therefore continues past its end time, one pass at a time, until no transmit is in flight, bounded at 10 s past the end.
+- **2026-09-30: frames orphaned by a reboot.** A frame in flight when the watchdog resets the node can still complete in the radio, but the sampler that started it is gone, so no `TX` line is ever printed for it.
+  The rig counts these as orphans, recognised by a `boot_count` in the transmitted frame that differs from the current node's.
+  `expected.json` gains `tx_orphaned`; `tx_ok` is the radio's completed-frame count minus orphans, and `unmatched_rec` includes accepted orphans as well as key-altering corruption.
+  The same can happen on hardware, and the README will say so.
