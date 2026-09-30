@@ -1,0 +1,207 @@
+********************************************************************************
+Obsolete PIO Core v6.1.18 is used (previous was 6.2.0)
+Please remove multiple PIO Cores from a system:
+https://docs.platformio.org/en/latest/core/installation/troubleshooting.html
+********************************************************************************
+Collected 28 tests (test_benchmark, test_burst_channel, test_downtime, test_duty_cycled, test_fakes, test_fault_evidence, test_gateway_format, test_hil, test_hil_burst, test_hil_criteria, test_hil_transcripts, test_interrupt, test_mesh, test_nmea, test_node_state, test_noisy_channel, test_orientation, test_packet, test_packet_queue, test_pairing, test_polling, test_power_bench, test_rig_channel, test_rig_transcript, test_ring_buffer, test_sample, test_tx_listener, test_ubx)
+
+Processing test_hil_burst in native environment
+--------------------------------------------------------------------------------
+Building...
+
+
+Testing...
+BURST_LINK,1e-06,2,100000,99974,0.999740,0.999640,26,0
+BURST_LINK,1e-06,4,100000,99987,0.999870,0.999640,13,0
+BURST_LINK,1e-06,8,100000,99990,0.999900,0.999640,10,0
+BURST_LINK,1e-06,16,100000,99997,0.999970,0.999640,3,0
+BURST_LINK,1e-06,32,100000,99999,0.999990,0.999640,1,0
+BURST_LINK,1e-05,2,100000,99730,0.997300,0.996406,270,0
+BURST_LINK,1e-05,4,100000,99844,0.998440,0.996406,156,0
+BURST_LINK,1e-05,8,100000,99916,0.999160,0.996406,84,0
+BURST_LINK,1e-05,16,100000,99956,0.999560,0.996406,44,0
+BURST_LINK,1e-05,32,100000,99979,0.999790,0.996406,21,0
+BURST_LINK,0.0001,2,100000,97628,0.976280,0.964639,2372,0
+BURST_LINK,0.0001,4,100000,98569,0.985690,0.964639,1431,0
+BURST_LINK,0.0001,8,100000,99137,0.991370,0.964639,863,0
+BURST_LINK,0.0001,16,100000,99527,0.995270,0.964639,473,0
+BURST_LINK,0.0001,32,100000,99743,0.997430,0.964639,257,0
+BURST_LINK,0.0003,2,100000,93050,0.930500,0.897613,6950,0
+BURST_LINK,0.0003,4,100000,95759,0.957590,0.897613,4241,0
+BURST_LINK,0.0003,8,100000,97531,0.975310,0.897613,2469,0
+BURST_LINK,0.0003,16,100000,98663,0.986630,0.897613,1337,0
+BURST_LINK,0.0003,32,100000,99257,0.992570,0.897613,743,0
+BURST_LINK,0.001,2,100000,78490,0.784900,0.697551,21510,0
+BURST_LINK,0.001,4,100000,86401,0.864010,0.697551,13599,0
+BURST_LINK,0.001,8,100000,92150,0.921500,0.697551,7850,0
+BURST_LINK,0.001,16,100000,95661,0.956610,0.697551,4339,0
+BURST_LINK,0.001,32,100000,97633,0.976330,0.697551,2368,1
+BURST_LINK,0.003,2,100000,48163,0.481630,0.339045,51837,0
+BURST_LINK,0.003,4,100000,64680,0.646800,0.339045,35321,1
+BURST_LINK,0.003,8,100000,77884,0.778840,0.339045,22116,0
+BURST_LINK,0.003,16,100000,87522,0.875220,0.339045,12478,0
+BURST_LINK,0.003,32,100000,93019,0.930190,0.339045,6981,0
+BURST_LINK,0.01,2,100000,8689,0.086890,0.026833,91312,1
+BURST_LINK,0.01,4,100000,22478,0.224780,0.026833,77522,0
+BURST_LINK,0.01,8,100000,43703,0.437030,0.026833,56297,0
+BURST_LINK,0.01,16,100000,63799,0.637990,0.026833,36201,0
+BURST_LINK,0.01,32,100000,78453,0.784530,0.026833,21547,0
+test/test_hil_burst/test_main.cpp:85:test_burst_link_group:PASS
+BURST_EXHAUSTIVE,data,10813439,0,1
+BURST_EXHAUSTIVE,crc_field,524288,12,0
+test/test_hil_burst/test_main.cpp:86:test_exhaustive_group:PASS
+BURST_INTEGRITY,0.01,32,1000000,214642,6,9.704,1
+test/test_hil_burst/test_main.cpp:87:test_burst_integrity_group:PASS
+BURST_REG,all,-,2,3
+test/test_hil_burst/test_main.cpp:88:test_summary:PASS
+
+-----------------------
+4 Tests 0 Failures 0 Ignored 
+OK
+
+-------------- native:test_hil_burst [PASSED] Took 24.24 seconds --------------
+
+=================================== SUMMARY ===================================
+Environment       Test                  Status    Duration
+----------------  --------------------  --------  ------------
+node_polling      test_downtime         SKIPPED
+node_polling      test_polling          SKIPPED
+node_polling      test_hil_criteria     SKIPPED
+node_polling      test_pairing          SKIPPED
+node_polling      test_tx_listener      SKIPPED
+node_polling      test_ring_buffer      SKIPPED
+node_polling      test_orientation      SKIPPED
+node_polling      test_power_bench      SKIPPED
+node_polling      test_fakes            SKIPPED
+node_polling      test_hil_transcripts  SKIPPED
+node_polling      test_gateway_format   SKIPPED
+node_polling      test_burst_channel    SKIPPED
+node_polling      test_benchmark        SKIPPED
+node_polling      test_duty_cycled      SKIPPED
+node_polling      test_mesh             SKIPPED
+node_polling      test_rig_channel      SKIPPED
+node_polling      test_hil              SKIPPED
+node_polling      test_node_state       SKIPPED
+node_polling      test_packet           SKIPPED
+node_polling      test_nmea             SKIPPED
+node_polling      test_ubx              SKIPPED
+node_polling      test_packet_queue     SKIPPED
+node_polling      test_noisy_channel    SKIPPED
+node_polling      test_hil_burst        SKIPPED
+node_polling      test_rig_transcript   SKIPPED
+node_polling      test_interrupt        SKIPPED
+node_polling      test_sample           SKIPPED
+node_polling      test_fault_evidence   SKIPPED
+node_interrupt    test_downtime         SKIPPED
+node_interrupt    test_polling          SKIPPED
+node_interrupt    test_hil_criteria     SKIPPED
+node_interrupt    test_pairing          SKIPPED
+node_interrupt    test_tx_listener      SKIPPED
+node_interrupt    test_ring_buffer      SKIPPED
+node_interrupt    test_orientation      SKIPPED
+node_interrupt    test_power_bench      SKIPPED
+node_interrupt    test_fakes            SKIPPED
+node_interrupt    test_hil_transcripts  SKIPPED
+node_interrupt    test_gateway_format   SKIPPED
+node_interrupt    test_burst_channel    SKIPPED
+node_interrupt    test_benchmark        SKIPPED
+node_interrupt    test_duty_cycled      SKIPPED
+node_interrupt    test_mesh             SKIPPED
+node_interrupt    test_rig_channel      SKIPPED
+node_interrupt    test_hil              SKIPPED
+node_interrupt    test_node_state       SKIPPED
+node_interrupt    test_packet           SKIPPED
+node_interrupt    test_nmea             SKIPPED
+node_interrupt    test_ubx              SKIPPED
+node_interrupt    test_packet_queue     SKIPPED
+node_interrupt    test_noisy_channel    SKIPPED
+node_interrupt    test_hil_burst        SKIPPED
+node_interrupt    test_rig_transcript   SKIPPED
+node_interrupt    test_interrupt        SKIPPED
+node_interrupt    test_sample           SKIPPED
+node_interrupt    test_fault_evidence   SKIPPED
+node_duty_cycled  test_downtime         SKIPPED
+node_duty_cycled  test_polling          SKIPPED
+node_duty_cycled  test_hil_criteria     SKIPPED
+node_duty_cycled  test_pairing          SKIPPED
+node_duty_cycled  test_tx_listener      SKIPPED
+node_duty_cycled  test_ring_buffer      SKIPPED
+node_duty_cycled  test_orientation      SKIPPED
+node_duty_cycled  test_power_bench      SKIPPED
+node_duty_cycled  test_fakes            SKIPPED
+node_duty_cycled  test_hil_transcripts  SKIPPED
+node_duty_cycled  test_gateway_format   SKIPPED
+node_duty_cycled  test_burst_channel    SKIPPED
+node_duty_cycled  test_benchmark        SKIPPED
+node_duty_cycled  test_duty_cycled      SKIPPED
+node_duty_cycled  test_mesh             SKIPPED
+node_duty_cycled  test_rig_channel      SKIPPED
+node_duty_cycled  test_hil              SKIPPED
+node_duty_cycled  test_node_state       SKIPPED
+node_duty_cycled  test_packet           SKIPPED
+node_duty_cycled  test_nmea             SKIPPED
+node_duty_cycled  test_ubx              SKIPPED
+node_duty_cycled  test_packet_queue     SKIPPED
+node_duty_cycled  test_noisy_channel    SKIPPED
+node_duty_cycled  test_hil_burst        SKIPPED
+node_duty_cycled  test_rig_transcript   SKIPPED
+node_duty_cycled  test_interrupt        SKIPPED
+node_duty_cycled  test_sample           SKIPPED
+node_duty_cycled  test_fault_evidence   SKIPPED
+gateway           test_downtime         SKIPPED
+gateway           test_polling          SKIPPED
+gateway           test_hil_criteria     SKIPPED
+gateway           test_pairing          SKIPPED
+gateway           test_tx_listener      SKIPPED
+gateway           test_ring_buffer      SKIPPED
+gateway           test_orientation      SKIPPED
+gateway           test_power_bench      SKIPPED
+gateway           test_fakes            SKIPPED
+gateway           test_hil_transcripts  SKIPPED
+gateway           test_gateway_format   SKIPPED
+gateway           test_burst_channel    SKIPPED
+gateway           test_benchmark        SKIPPED
+gateway           test_duty_cycled      SKIPPED
+gateway           test_mesh             SKIPPED
+gateway           test_rig_channel      SKIPPED
+gateway           test_hil              SKIPPED
+gateway           test_node_state       SKIPPED
+gateway           test_packet           SKIPPED
+gateway           test_nmea             SKIPPED
+gateway           test_ubx              SKIPPED
+gateway           test_packet_queue     SKIPPED
+gateway           test_noisy_channel    SKIPPED
+gateway           test_hil_burst        SKIPPED
+gateway           test_rig_transcript   SKIPPED
+gateway           test_interrupt        SKIPPED
+gateway           test_sample           SKIPPED
+gateway           test_fault_evidence   SKIPPED
+native            test_downtime         SKIPPED
+native            test_polling          SKIPPED
+native            test_hil_criteria     SKIPPED
+native            test_pairing          SKIPPED
+native            test_tx_listener      SKIPPED
+native            test_ring_buffer      SKIPPED
+native            test_orientation      SKIPPED
+native            test_power_bench      SKIPPED
+native            test_fakes            SKIPPED
+native            test_hil_transcripts  SKIPPED
+native            test_gateway_format   SKIPPED
+native            test_burst_channel    SKIPPED
+native            test_benchmark        SKIPPED
+native            test_duty_cycled      SKIPPED
+native            test_mesh             SKIPPED
+native            test_rig_channel      SKIPPED
+native            test_hil              SKIPPED
+native            test_node_state       SKIPPED
+native            test_packet           SKIPPED
+native            test_nmea             SKIPPED
+native            test_ubx              SKIPPED
+native            test_packet_queue     SKIPPED
+native            test_noisy_channel    SKIPPED
+native            test_hil_burst        PASSED    00:00:24.235
+native            test_rig_transcript   SKIPPED
+native            test_interrupt        SKIPPED
+native            test_sample           SKIPPED
+native            test_fault_evidence   SKIPPED
+================== 4 test cases: 4 succeeded in 00:00:24.235 ==================

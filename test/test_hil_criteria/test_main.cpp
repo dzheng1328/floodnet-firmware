@@ -96,6 +96,49 @@ void test_integrity_bound(void) {
     TEST_ASSERT_FALSE(integrity_pass(12, 262144));
 }
 
+// Pinned to docs/results/milestone-4-hil-regression.txt: the refactor of
+// run_link() must not move milestone 4's numbers.
+void test_run_link_reproduces_milestone_4_rows(void) {
+    const LinkResult a = run_link(1e-3, kLinkFrames, kChannelSeed);
+    TEST_ASSERT_EQUAL_UINT32(69617, a.accepted);
+    TEST_ASSERT_EQUAL_UINT32(0, a.undetected);
+    const LinkResult b = run_link(1e-2, kLinkFrames, kChannelSeed);
+    TEST_ASSERT_EQUAL_UINT32(2741, b.accepted);
+    TEST_ASSERT_EQUAL_UINT32(2, b.undetected);
+}
+
+// x^16 + x^12 + x^5 + 1 placed in the data bytes is a multiple of the CRC
+// polynomial, so the CRC cannot see it.
+void test_crc_polynomial_pattern_is_undetected(void) {
+    uint8_t sent[PACKET_SIZE];
+    build_link_frame(0, sent);
+    uint8_t errors[PACKET_SIZE];
+    memset(errors, 0, sizeof errors);
+    const size_t start = 100;
+    const size_t offsets[] = {0, 4, 11, 16};
+    for (size_t i = 0; i < 4; ++i) {
+        const size_t bit = start + offsets[i];
+        errors[bit / 8] |= static_cast<uint8_t>(0x80u >> (bit % 8));
+    }
+    TEST_ASSERT_TRUE(pattern_undetected(sent, errors));
+}
+
+void test_single_bit_pattern_is_detected(void) {
+    uint8_t sent[PACKET_SIZE];
+    build_link_frame(0, sent);
+    uint8_t errors[PACKET_SIZE];
+    memset(errors, 0, sizeof errors);
+    errors[25] = 0x10;
+    TEST_ASSERT_FALSE(pattern_undetected(sent, errors));
+}
+
+void test_crc_field_starts_at_byte_43(void) {
+    TEST_ASSERT_EQUAL_UINT32(344, kCrcFieldFirstBit);
+    TEST_ASSERT_FALSE(in_crc_field(343));
+    TEST_ASSERT_TRUE(in_crc_field(344));
+    TEST_ASSERT_TRUE(in_crc_field(359));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_link_frame_decodes);
@@ -108,5 +151,9 @@ int main(int, char **) {
     RUN_TEST(test_link_pass_is_exact_at_zero_p);
     RUN_TEST(test_link_pass_uses_three_sigma);
     RUN_TEST(test_integrity_bound);
+    RUN_TEST(test_run_link_reproduces_milestone_4_rows);
+    RUN_TEST(test_crc_polynomial_pattern_is_undetected);
+    RUN_TEST(test_single_bit_pattern_is_detected);
+    RUN_TEST(test_crc_field_starts_at_byte_43);
     return UNITY_END();
 }
