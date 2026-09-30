@@ -5,10 +5,13 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
 #include <floodnet/downtime.hpp>
+#include <floodnet/gateway_format.hpp>
+#include <floodnet/hal/tx_listener.hpp>
 #include <floodnet/mesh.hpp>
 #include <floodnet/packet.hpp>
 
@@ -44,6 +47,10 @@ const uint8_t kRigTtl = 3;
 /// FakeRadio keeps at most 64 payload bytes, so a channel copy never needs more.
 const size_t kRigMaxFrame = 64;
 
+/// How far past its end time run_until_quiet() may go to let a transmit in
+/// flight finish. SF12 airtime is about 3 s and the sampler's timeout 5 s.
+const uint32_t kRigQuietLimitMs = 10000;
+
 /// Ends a hang when the run ends: for the build that has no watchdog.
 class ScenarioEnd : public IHangBreaker {
   public:
@@ -78,7 +85,12 @@ class PowerRig {
           last_sent_(0),
           reboots_(0),
           channel_(nullptr),
-          queued_before_boot_(0) {
+          queued_before_boot_(0),
+          tx_listener_(nullptr),
+          decode_failures_(0),
+          orphans_(0),
+          unmatched_accepted_(0),
+          timeouts_before_boot_(0) {
         // FakePower first: each tick is charged at the state it began in.
         clock_.add_observer(&power_);
         clock_.add_observer(&gps_);
@@ -111,16 +123,20 @@ class PowerRig {
     void run_until(uint32_t end_ms) {
         end_.set_end(end_ms);
         while (clock_.now_ms() < end_ms && !power_.depleted()) {
-            apply_faults();
-            if (node_) {
-                node_->step();
-            } else {
-                sampler_->step();
-            }
-            collect_delivery();
-            if (node_ && watchdog_.expired()) {
-                reboot();
-            }
+            step_once();
+        }
+    }
+
+    /// run_until(end_ms), then one pass at a time until no transmit is in
+    /// flight, at most kRigQuietLimitMs past `end_ms`. A transcript that ends
+    /// between the radio completing a frame and the sampler observing it
+    /// would show a REC line with no TX line.
+    void run_until_quiet(uint32_t end_ms) {
+        run_until(end_ms);
+        const uint32_t limit = end_ms + kRigQuietLimitMs;
+        end_.set_end(limit);
+        while (tx_in_flight() && clock_.now_ms() < limit && !power_.depleted()) {
+            step_once();
         }
     }
 
@@ -158,6 +174,43 @@ class PowerRig {
         return queued_before_boot_ + current;
     }
 
+    /// Told of every transmit's end by whichever node is running, including
+    /// one booted after a watchdog reset.
+    void set_tx_listener(ITxListener *listener) {
+        tx_listener_ = listener;
+        if (node_) {
+            node_->set_tx_listener(listener);
+        } else {
+            sampler_->set_tx_listener(listener);
+        }
+    }
+
+    /// Receives the gateway's lines, exactly as the board would print them,
+    /// with the rig's clock. RSSI is 0: nothing models it.
+    void set_gateway_log(std::function<void(uint32_t t_ms, const char *line)> sink) {
+        gateway_log_ = sink;
+    }
+
+    bool tx_in_flight() const {
+        return node_ ? node_->sampler().tx_in_flight() : sampler_->tx_in_flight();
+    }
+
+    size_t decode_failures() const { return decode_failures_; }
+
+    /// Radio completions of frames started by a node that has since been
+    /// reset: no sampler is left to report them.
+    size_t tx_orphaned() const { return orphans_; }
+
+    /// Accepted frames that no TX line will match: orphans, and frames whose
+    /// (node_id, boot_count, seq) the channel altered without the CRC noticing.
+    size_t unmatched_accepted() const { return unmatched_accepted_; }
+
+    uint32_t tx_timeouts_total() const {
+        const uint32_t current =
+            node_ ? node_->sampler().tx_timeouts() : sampler_->tx_timeouts();
+        return timeouts_before_boot_ + current;
+    }
+
     /// Scheduled faults, in add_fault() order, and whether each has begun.
     /// A run that never reached a fault's start did not measure that fault.
     size_t fault_count() const { return faults_.size(); }
@@ -183,6 +236,7 @@ class PowerRig {
     void boot() {
         node_.reset(new DutyCycledNode(gps_, imu_, radio_, clock_, power_, watchdog_, store_,
                                        config()));
+        node_->set_tx_listener(tx_listener_);
         node_->begin();
     }
 
@@ -191,9 +245,23 @@ class PowerRig {
     void reboot() {
         ++reboots_;
         queued_before_boot_ += node_->sampler().next_seq();
+        timeouts_before_boot_ += node_->sampler().tx_timeouts();
         node_.reset();
         watchdog_.on_mcu_reset();
         boot();
+    }
+
+    void step_once() {
+        apply_faults();
+        if (node_) {
+            node_->step();
+        } else {
+            sampler_->step();
+        }
+        collect_delivery();
+        if (node_ && watchdog_.expired()) {
+            reboot();
+        }
     }
 
     void collect_delivery() {
@@ -201,6 +269,16 @@ class PowerRig {
             return;
         }
         last_sent_ = radio_.sent_count();
+
+        // What was transmitted, before the channel: its key, and whether a
+        // node that has since been reset started it.
+        Packet sent;
+        const bool sent_decodes = decode_packet(radio_.last_payload(), radio_.last_length(), &sent);
+        const bool orphan = node_ && sent_decodes && sent.boot_count != node_->boot_count();
+        if (orphan) {
+            ++orphans_;
+        }
+
         Packet packet;
         const uint8_t *payload = radio_.last_payload();
         size_t length = radio_.last_length();
@@ -214,6 +292,15 @@ class PowerRig {
             payload = received;
         }
         if (!decode_packet(payload, length, &packet)) {
+            ++decode_failures_;
+            if (gateway_log_) {
+                char line[32];
+                const uint16_t count =
+                    decode_failures_ > 0xFFFF ? 0xFFFF : static_cast<uint16_t>(decode_failures_);
+                if (format_decode_error_line(count, line, sizeof(line)) > 0) {
+                    gateway_log_(clock_.now_ms(), line);
+                }
+            }
             return;
         }
         // The gateway's own dedup, so a key bug would show up as lost records.
@@ -221,12 +308,24 @@ class PowerRig {
             return;
         }
         deliveries_.push_back(packet);
+        const bool key_altered = sent_decodes && (packet.node_id != sent.node_id ||
+                                                  packet.boot_count != sent.boot_count ||
+                                                  packet.seq != sent.seq);
+        if (orphan || key_altered) {
+            ++unmatched_accepted_;
+        }
         GatewayRecord record;
         record.arrival_ms = clock_.now_ms();
         record.gps_valid = packet.record.gps.valid;
         record.boot_count = packet.boot_count;
         record.tx_timeouts = packet.tx_timeouts;
         records_.push_back(record);
+        if (gateway_log_) {
+            char line[REC_LINE_MAX];
+            if (format_rec_line(packet, 0, line, sizeof(line)) > 0) {
+                gateway_log_(clock_.now_ms(), line);
+            }
+        }
     }
 
     void apply_faults() {
@@ -295,6 +394,12 @@ class PowerRig {
     size_t reboots_;
     NoisyChannel *channel_;
     uint32_t queued_before_boot_;
+    ITxListener *tx_listener_;
+    std::function<void(uint32_t, const char *)> gateway_log_;
+    size_t decode_failures_;
+    size_t orphans_;
+    size_t unmatched_accepted_;
+    uint32_t timeouts_before_boot_;
 };
 
 }  // namespace floodnet
