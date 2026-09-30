@@ -1,7 +1,7 @@
 # FloodNet Milestone 4: Link Regression and Signal-Integrity Tool
 
 Date: 2026-09-30
-Status: draft, awaiting review
+Status: approved
 Parent spec: `docs/superpowers/specs/2026-09-20-floodnet-firmware-design.md`
 Previous milestone: `docs/superpowers/specs/2026-09-29-milestone-3-power-management-design.md`
 
