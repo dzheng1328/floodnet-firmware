@@ -88,7 +88,7 @@ class PowerRig {
           queued_before_boot_(0),
           tx_listener_(nullptr),
           decode_failures_(0),
-          orphans_(0),
+          resets_mid_transmit_(0),
           unmatched_accepted_(0),
           timeouts_before_boot_(0) {
         // FakePower first: each tick is charged at the state it began in.
@@ -197,11 +197,13 @@ class PowerRig {
 
     size_t decode_failures() const { return decode_failures_; }
 
-    /// Radio completions of frames started by a node that has since been
-    /// reset: no sampler is left to report them.
-    size_t tx_orphaned() const { return orphans_; }
+    /// Watchdog resets that struck with a transmit in flight. On hardware the
+    /// frame could still complete with no TX line ever printed for it; in the
+    /// duty-cycled build the IMU (the only fault that hangs) and the radio are
+    /// never powered together, so this stays 0 and the transcripts assert it.
+    size_t resets_mid_transmit() const { return resets_mid_transmit_; }
 
-    /// Accepted frames that no TX line will match: orphans, and frames whose
+    /// Accepted frames that no TX line will match: frames whose
     /// (node_id, boot_count, seq) the channel altered without the CRC noticing.
     size_t unmatched_accepted() const { return unmatched_accepted_; }
 
@@ -244,6 +246,9 @@ class PowerRig {
     /// peripherals keep their state, and WDOG1 is disabled until begin().
     void reboot() {
         ++reboots_;
+        if (node_->sampler().tx_in_flight() || radio_.transmitting()) {
+            ++resets_mid_transmit_;
+        }
         queued_before_boot_ += node_->sampler().next_seq();
         timeouts_before_boot_ += node_->sampler().tx_timeouts();
         node_.reset();
@@ -270,14 +275,10 @@ class PowerRig {
         }
         last_sent_ = radio_.sent_count();
 
-        // What was transmitted, before the channel: its key, and whether a
-        // node that has since been reset started it.
+        // What was transmitted, before the channel, so an accepted frame whose
+        // key the channel altered can be recognised.
         Packet sent;
         const bool sent_decodes = decode_packet(radio_.last_payload(), radio_.last_length(), &sent);
-        const bool orphan = node_ && sent_decodes && sent.boot_count != node_->boot_count();
-        if (orphan) {
-            ++orphans_;
-        }
 
         Packet packet;
         const uint8_t *payload = radio_.last_payload();
@@ -311,7 +312,7 @@ class PowerRig {
         const bool key_altered = sent_decodes && (packet.node_id != sent.node_id ||
                                                   packet.boot_count != sent.boot_count ||
                                                   packet.seq != sent.seq);
-        if (orphan || key_altered) {
+        if (key_altered) {
             ++unmatched_accepted_;
         }
         GatewayRecord record;
@@ -397,7 +398,7 @@ class PowerRig {
     ITxListener *tx_listener_;
     std::function<void(uint32_t, const char *)> gateway_log_;
     size_t decode_failures_;
-    size_t orphans_;
+    size_t resets_mid_transmit_;
     size_t unmatched_accepted_;
     uint32_t timeouts_before_boot_;
 };

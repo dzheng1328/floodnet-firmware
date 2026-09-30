@@ -42,7 +42,7 @@ void test_completed_listener_events_equal_radio_completions(void) {
     rig.set_tx_listener(&rec);
     rig.run_until_quiet(600000UL);
     TEST_ASSERT_TRUE(rec.completed > 0);
-    TEST_ASSERT_EQUAL_UINT32(rig.radio().sent_count() - rig.tx_orphaned(), rec.completed);
+    TEST_ASSERT_EQUAL_UINT32(rig.radio().sent_count(), rec.completed);
     TEST_ASSERT_EQUAL_UINT32(rig.tx_timeouts_total(), rec.abandoned);
 }
 
@@ -54,7 +54,10 @@ void test_listener_survives_a_reboot(void) {
     rig.run_until_quiet(kFaultRunMs);
     TEST_ASSERT_EQUAL_UINT32(1, rig.reboots());
     TEST_ASSERT_EQUAL_UINT32(2, rec.boots.size());
-    TEST_ASSERT_EQUAL_UINT32(rig.radio().sent_count() - rig.tx_orphaned(), rec.completed);
+    // The IMU and the radio are never powered together, so the hang cannot
+    // strike with a frame in flight, and no completion goes unreported.
+    TEST_ASSERT_EQUAL_UINT32(0, rig.resets_mid_transmit());
+    TEST_ASSERT_EQUAL_UINT32(rig.radio().sent_count(), rec.completed);
 }
 
 void test_lost_completion_is_a_timeout(void) {

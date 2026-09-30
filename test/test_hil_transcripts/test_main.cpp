@@ -109,15 +109,16 @@ static void write_scenario(const Scenario &s) {
     if (s.has_fault) {
         TEST_ASSERT_TRUE_MESSAGE(rig.fault_started(0), "fault never started");
     }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rig.resets_mid_transmit(),
+                                     "a reset struck with a transmit in flight");
 
-    const size_t tx_ok = rig.radio().sent_count() - rig.tx_orphaned();
+    const size_t tx_ok = rig.radio().sent_count();
     fprintf(expected,
             "{\"scenario\": \"%s\", \"build\": \"%s\", \"p\": %g, \"tx_ok\": %lu, "
-            "\"tx_timeout\": %lu, \"tx_orphaned\": %lu, \"rec_lines\": %lu, "
+            "\"tx_timeout\": %lu, \"rec_lines\": %lu, "
             "\"unmatched_rec\": %lu, \"decode_errors\": %lu}\n",
             s.name, s.build == Build::Interrupt ? "interrupt" : "duty_cycled", s.p,
             static_cast<unsigned long>(tx_ok), static_cast<unsigned long>(rig.tx_timeouts_total()),
-            static_cast<unsigned long>(rig.tx_orphaned()),
             static_cast<unsigned long>(rig.deliveries().size()),
             static_cast<unsigned long>(rig.unmatched_accepted()),
             static_cast<unsigned long>(rig.decode_failures()));
