@@ -353,7 +353,6 @@ None changes the frozen scenario.
   Added after review of the experiment code; the rerun that verified it printed every `LIFE` and `DOWNTIME` line byte-identical to the first run, so no measured value changed.
 - **Benchmark identity check compares the first 12 `BENCH` lines.** `pio test -v` echoes 4 of the existing rows a second time, so an unfiltered diff reports 4 lines even on an untouched tree.
   Made during implementation; it changes how the check reads the output, not what the benchmark measures.
-
 - **Completion check replaced by a fault-started check.** `run_until()` only returns at its end time or on a depleted battery, so the completion assertion above could not fail.
   Experiments 2 and 3 now assert that every scheduled fault started, or that the battery died at or before that fault's start time.
   A deliberately broken local edit that never starts the hang fault made both experiments fail; it was reverted and never committed.

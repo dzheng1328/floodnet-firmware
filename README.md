@@ -518,7 +518,9 @@ The nonzero rows:
 - **Sky blockage.** Both builds are down for most of the 2-hour blockage.
   The reference figure 7200000 - 600000 = 6600000 ms makes two assumptions: that the last valid report arrived exactly when the blockage began, and that reports resumed the instant the sky cleared.
   `interrupt` measured 6578310 and `duty_cycled` 6925010.
-  The first assumption does not hold for `interrupt`: its last valid record before the blockage arrived at 7224810 ms, 24.8 s after the blockage began at 7200000 ms, which is why it measured below the reference (pinned by `test_interrupt_sky_blockage_last_record_after_start`).
+  The first assumption does not hold for `interrupt`: its last valid record before the blockage arrived at 7224810 ms, 24.8 s after the blockage began at 7200000 ms (pinned by `test_interrupt_sky_blockage_last_record_after_start`).
+  The second does not hold exactly either: 7224810 + 600000 + 6578310 = 14403120 ms, so the first valid record after the blockage arrived 3.12 s after the sky cleared at 14400000 ms.
+  Together the late last record (-24810 ms) and the late first record (+3120 ms) account for `interrupt` measuring 21690 ms below the reference.
   Why `duty_cycled` lands above the reference has not been instrumented, so the 346700 ms difference between the builds is not interpreted further here.
   What does differ by design is the cause: `duty_cycled` sends `gps_valid = 0` heartbeats, so the gateway sees `no_gps` and knows the node is alive; `interrupt` sends nothing, so the same outage is `silent`.
 - **Radio wedge, `duty_cycled`: 600000 ms, set by policy.**
@@ -670,6 +672,7 @@ It is recorded here as future work so that "did anything change after you saw th
 - **The experiments run on every push.** CI runs `pio test -e native`, which includes `test_power_bench`.
   In the saved experiment output, committed as [docs/results/milestone-3-power-bench.txt](docs/results/milestone-3-power-bench.txt), `test_power_bench` took 18.44 s.
   Before `test_fault_evidence` was added, the whole native suite of 189 test cases took about 24 to 28 s across the runs recorded on the development machine; that range is machine-specific and not a committed artifact, and a CI runner's time will differ.
+  With `test_fault_evidence` the suite has 198 test cases, and one run on the same machine took 34.6 s.
 
 ### Recovery exists only in `node_duty_cycled`
 
