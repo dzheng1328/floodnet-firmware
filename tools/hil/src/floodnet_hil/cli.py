@@ -42,11 +42,20 @@ def main(argv: list[str] | None = None) -> int:
         except serial.SerialException as err:
             print(f"floodnet-hil: cannot open {device}: {err}", file=sys.stderr)
             return 2
+    def opener(device: str):
+        return lambda: serial.Serial(device, args.baud, timeout=0.05)
+
     run_dir = args.out / args.label
-    counts = capture(ports, run_dir, args.seconds)
+    counts = capture(
+        ports,
+        run_dir,
+        args.seconds,
+        reopen={"node": opener(args.node), "gateway": opener(args.gateway)},
+    )
     print(
         f"captured {counts['node']} node lines and {counts['gateway']} gateway lines "
-        f"into {run_dir}"
+        f"into {run_dir} (reconnects: node {counts['node_reconnects']}, "
+        f"gateway {counts['gateway_reconnects']})"
     )
     return 0
 
