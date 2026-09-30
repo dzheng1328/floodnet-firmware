@@ -51,8 +51,9 @@ inline bool is_undetected(const uint8_t *sent, const uint8_t *received, size_t l
     return accepted && memcmp(sent, received, len) != 0;
 }
 
-inline LinkResult run_link(double p, uint32_t frames, uint64_t seed) {
-    NoisyChannel channel(p, seed);
+/// A link sweep through any channel with `size_t corrupt(uint8_t *, size_t)`.
+template <typename Channel>
+inline LinkResult run_link_with(Channel &channel, uint32_t frames) {
     LinkResult r = {frames, 0, 0, 0};
     uint8_t sent[PACKET_SIZE];
     uint8_t received[PACKET_SIZE];
@@ -75,6 +76,11 @@ inline LinkResult run_link(double p, uint32_t frames, uint64_t seed) {
     return r;
 }
 
+inline LinkResult run_link(double p, uint32_t frames, uint64_t seed) {
+    NoisyChannel channel(p, seed);
+    return run_link_with(channel, frames);
+}
+
 /// Probability that no bit of a frame flips.
 inline double expected_ratio(double p) { return pow(1.0 - p, PACKET_SIZE * 8.0); }
 
@@ -95,6 +101,80 @@ inline double integrity_bound(uint32_t corrupted) {
 
 inline bool integrity_pass(uint32_t undetected, uint32_t corrupted) {
     return static_cast<double>(undetected) <= integrity_bound(corrupted);
+}
+
+// Frozen in the milestone 6 design doc, "Frozen constants", before any of
+// this ran. The BER points are kBerPoints without its first entry, 0.
+const double kBurstLengths[] = {2.0, 4.0, 8.0, 16.0, 32.0};
+const size_t kBurstLengthCount = sizeof(kBurstLengths) / sizeof(kBurstLengths[0]);
+const uint32_t kBurstLinkFrames = 100000;
+const uint32_t kBurstIntegrityFrames = 1000000;
+const double kBurstIntegrityBer = 1e-2;
+const double kBurstIntegrityLength = 32.0;
+
+/// The span a 16-bit polynomial code is guaranteed to catch.
+const size_t kMaxBurstSpan = 16;
+/// Bytes 43 and 44 carry the CRC, stored little-endian by put_u16().
+const size_t kCrcFieldFirstBit = 43 * 8;
+
+/// A burst belongs to the crc_field region when any flipped bit, and so its
+/// last one, lies in bytes 43 or 44.
+inline bool in_crc_field(size_t last_flipped_bit) { return last_flipped_bit >= kCrcFieldFirstBit; }
+
+/// True when `sent` with the bits set in `errors` flipped is accepted by
+/// decode_packet(): corruption that got through.
+inline bool pattern_undetected(const uint8_t *sent, const uint8_t *errors) {
+    uint8_t received[PACKET_SIZE];
+    for (size_t i = 0; i < PACKET_SIZE; ++i) {
+        received[i] = static_cast<uint8_t>(sent[i] ^ errors[i]);
+    }
+    Packet decoded;
+    const bool accepted = decode_packet(received, PACKET_SIZE, &decoded);
+    return is_undetected(sent, received, PACKET_SIZE, accepted);
+}
+
+struct ExhaustiveResult {
+    uint64_t data_patterns;
+    uint64_t data_undetected;
+    uint64_t crc_patterns;
+    uint64_t crc_undetected;
+};
+
+/// Every error pattern spanning 1 to kMaxBurstSpan bits, at every position
+/// in the frame, in transmission order (byte 0 first, most significant bit
+/// first). For a span w >= 2 the first and last bits are set and the w - 2
+/// bits between them take every value.
+inline ExhaustiveResult run_exhaustive_bursts(const uint8_t *sent) {
+    ExhaustiveResult r = {0, 0, 0, 0};
+    const size_t bits = PACKET_SIZE * 8;
+    uint8_t errors[PACKET_SIZE];
+    for (size_t w = 1; w <= kMaxBurstSpan; ++w) {
+        const uint32_t interiors = w >= 2 ? (1u << (w - 2)) : 1u;
+        for (size_t a = 0; a + w <= bits; ++a) {
+            const size_t last = a + w - 1;
+            const bool crc_field = in_crc_field(last);
+            for (uint32_t m = 0; m < interiors; ++m) {
+                memset(errors, 0, sizeof errors);
+                errors[a / 8] |= static_cast<uint8_t>(0x80u >> (a % 8));
+                errors[last / 8] |= static_cast<uint8_t>(0x80u >> (last % 8));
+                for (size_t j = 0; j + 2 < w; ++j) {
+                    if ((m >> j) & 1u) {
+                        const size_t bit = a + 1 + j;
+                        errors[bit / 8] |= static_cast<uint8_t>(0x80u >> (bit % 8));
+                    }
+                }
+                const bool missed = pattern_undetected(sent, errors);
+                if (crc_field) {
+                    ++r.crc_patterns;
+                    r.crc_undetected += missed ? 1 : 0;
+                } else {
+                    ++r.data_patterns;
+                    r.data_undetected += missed ? 1 : 0;
+                }
+            }
+        }
+    }
+    return r;
 }
 
 }  // namespace floodnet
