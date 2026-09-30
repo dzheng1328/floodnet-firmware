@@ -11,7 +11,7 @@ The gateway writes framed records to a serial link, where a host-side pipeline i
 
 This repository holds the node and gateway firmware, the hardware-in-the-loop test tooling, and the host pipeline.
 
-The codebase is a clean rewrite of firmware built for a Duke research lab between August 2024 and May 2026.
+The codebase is a clean rewrite of firmware built for riva labs between August 2024 and May 2026.
 The original lives on lab infrastructure and is not available here, so every line in this repository is written from scratch against the same requirements.
 
 ## Goals
