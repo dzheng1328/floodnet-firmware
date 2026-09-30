@@ -10,7 +10,8 @@ const uint32_t PAIRING_SKEW_MS = 250;
 }  // namespace
 
 InterruptSampler::InterruptSampler(IGpsSource &gps, IImuSource &imu, IAsyncRadio &radio,
-                                   IClock &clock, uint16_t node_id, uint8_t ttl)
+                                   IClock &clock, uint16_t node_id, uint8_t ttl,
+                                   WireVersion version)
     : gps_(gps),
       imu_(imu),
       radio_(radio),
@@ -25,7 +26,23 @@ InterruptSampler::InterruptSampler(IGpsSource &gps, IImuSource &imu, IAsyncRadio
       tx_in_flight_(false),
       tx_started_ms_(0),
       tx_timeouts_(0),
-      diag_() {}
+      diag_(),
+      version_(version),
+      boot_count_(0),
+      battery_mv_(0),
+      last_record_imu_valid_(false) {}
+
+void InterruptSampler::set_node_status(uint16_t boot_count, uint16_t battery_mv) {
+    boot_count_ = boot_count;
+    battery_mv_ = battery_mv;
+}
+
+void InterruptSampler::enqueue_heartbeat() {
+    GpsFix fix;
+    fix.time_ms = clock_.now_ms();
+    fix.valid = false;
+    enqueue(fix);
+}
 
 bool InterruptSampler::collect_imu() {
     // The whole improvement on this path in one line: no read unless the
@@ -78,6 +95,7 @@ void InterruptSampler::enqueue(const GpsFix &fix) {
     packet.seq = seq_++;
     packet.ttl = ttl_;
     packet.record = pairer_.pair(fix, diag_);
+    last_record_imu_valid_ = packet.record.imu.valid;
 
     // Never fails: a full queue discards its oldest entry and counts it.
     tx_queue_.push(packet);
@@ -117,8 +135,14 @@ bool InterruptSampler::service_radio() {
         return false;
     }
 
+    // Stamped at send time rather than queue time, so a packet carries the
+    // freshest counters. The v0x01 encoder ignores all three.
+    packet.boot_count = boot_count_;
+    packet.tx_timeouts = tx_timeouts_;
+    packet.battery_mv = battery_mv_;
+
     uint8_t buffer[PACKET_SIZE];
-    if (encode_packet(packet, buffer, sizeof(buffer)) != PACKET_SIZE) {
+    if (encode_packet_as(version_, packet, buffer, sizeof(buffer)) != PACKET_SIZE) {
         // Unreachable with a PACKET_SIZE buffer, but returning here without
         // the packet would leave a sequence gap no counter explains, which is
         // exactly what this class promises not to do. push() appends at the

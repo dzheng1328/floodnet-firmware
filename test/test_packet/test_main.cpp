@@ -29,6 +29,14 @@ static Packet make_packet(void) {
     return p;
 }
 
+static Packet make_packet_v2(void) {
+    Packet p = make_packet();
+    p.boot_count = 0x0305;
+    p.tx_timeouts = 9;
+    p.battery_mv = 3712;
+    return p;
+}
+
 void test_crc16_matches_known_vector(void) {
     // CRC16-CCITT-FALSE of "123456789" is 0x29B1.
     const uint8_t input[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9'};
@@ -119,6 +127,135 @@ void test_decode_rejects_wrong_length(void) {
     TEST_ASSERT_FALSE(decode_packet(buf, PACKET_SIZE - 1, &decoded));
 }
 
+void test_v2_golden_vector_pins_byte_layout(void) {
+    uint8_t buf[PACKET_SIZE];
+    TEST_ASSERT_EQUAL_UINT(PACKET_SIZE, encode_packet_v2(make_packet_v2(), buf, sizeof(buf)));
+
+    // Computed independently of encode_packet_v2 (Python reference encoder
+    // over the layout in the milestone 3 design doc). Flags 0x5A keeps its
+    // upper six bits and gains both validity bits: 0x5B. Skew is 995 - 1000.
+    static const uint8_t expected[PACKET_SIZE] = {
+        0xFD, 0x02, 0x34, 0x12, 0xEF, 0xBE, 0xAD, 0xDE, 0x03, 0x5B,
+        0xE8, 0x03, 0x00, 0x00, 0x08, 0x1E, 0xAE, 0x1C, 0x35, 0xB2,
+        0x22, 0xF9, 0x78, 0x52, 0x08, 0x00, 0x08, 0xFB, 0xFF, 0x6C,
+        0xEE, 0xFA, 0x00, 0xD4, 0xFE, 0x07, 0x00, 0x05, 0x03, 0x09,
+        0x00, 0x80, 0x0E, 0x23, 0xD2,
+    };
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, buf, PACKET_SIZE);
+}
+
+void test_v2_round_trip_preserves_every_field(void) {
+    Packet original = make_packet_v2();
+    original.flags = 0x58;  // low two bits belong to validity in v0x02
+    uint8_t buf[PACKET_SIZE];
+    encode_packet_v2(original, buf, sizeof(buf));
+
+    Packet decoded;
+    TEST_ASSERT_TRUE(decode_packet(buf, sizeof(buf), &decoded));
+    TEST_ASSERT_EQUAL_UINT16(original.node_id, decoded.node_id);
+    TEST_ASSERT_EQUAL_UINT32(original.seq, decoded.seq);
+    TEST_ASSERT_EQUAL_UINT8(original.ttl, decoded.ttl);
+    TEST_ASSERT_EQUAL_UINT8(0x58, decoded.flags);
+    TEST_ASSERT_EQUAL_UINT32(original.record.gps.time_ms, decoded.record.gps.time_ms);
+    TEST_ASSERT_EQUAL_INT32(original.record.gps.lat_1e7, decoded.record.gps.lat_1e7);
+    TEST_ASSERT_EQUAL_INT32(original.record.gps.lon_1e7, decoded.record.gps.lon_1e7);
+    TEST_ASSERT_EQUAL_INT32(original.record.gps.alt_mm, decoded.record.gps.alt_mm);
+    TEST_ASSERT_EQUAL_UINT8(original.record.gps.satellites, decoded.record.gps.satellites);
+    TEST_ASSERT_TRUE(decoded.record.gps.valid);
+    TEST_ASSERT_EQUAL_UINT32(original.record.imu.time_ms, decoded.record.imu.time_ms);
+    TEST_ASSERT_EQUAL_INT16(original.record.imu.yaw_cd, decoded.record.imu.yaw_cd);
+    TEST_ASSERT_EQUAL_INT16(original.record.imu.pitch_cd, decoded.record.imu.pitch_cd);
+    TEST_ASSERT_EQUAL_INT16(original.record.imu.roll_cd, decoded.record.imu.roll_cd);
+    TEST_ASSERT_TRUE(decoded.record.imu.valid);
+    TEST_ASSERT_EQUAL_UINT16(original.record.diag.drops, decoded.record.diag.drops);
+    TEST_ASSERT_EQUAL_UINT16(0, decoded.record.diag.crc_errors);  // not carried in v0x02
+    TEST_ASSERT_EQUAL_UINT16(0x0305, decoded.boot_count);
+    TEST_ASSERT_EQUAL_UINT16(9, decoded.tx_timeouts);
+    TEST_ASSERT_EQUAL_UINT16(3712, decoded.battery_mv);
+}
+
+void test_v2_folds_validity_into_flag_bits(void) {
+    Packet p = make_packet_v2();
+    p.flags = 0;
+    p.record.gps.valid = false;
+    uint8_t buf[PACKET_SIZE];
+    encode_packet_v2(p, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_HEX8(FLAG_IMU_VALID, buf[9]);
+
+    Packet decoded;
+    TEST_ASSERT_TRUE(decode_packet(buf, sizeof(buf), &decoded));
+    TEST_ASSERT_FALSE(decoded.record.gps.valid);
+    TEST_ASSERT_TRUE(decoded.record.imu.valid);
+    TEST_ASSERT_EQUAL_HEX8(0, decoded.flags);
+}
+
+void test_v2_marks_imu_invalid_when_skew_does_not_fit(void) {
+    Packet p = make_packet_v2();
+    p.record.imu.time_ms = p.record.gps.time_ms + 40000;  // beyond int16 milliseconds
+    uint8_t buf[PACKET_SIZE];
+    TEST_ASSERT_EQUAL_UINT(PACKET_SIZE, encode_packet_v2(p, buf, sizeof(buf)));
+
+    Packet decoded;
+    TEST_ASSERT_TRUE(decode_packet(buf, sizeof(buf), &decoded));
+    TEST_ASSERT_FALSE(decoded.record.imu.valid);
+    TEST_ASSERT_EQUAL_UINT32(0, decoded.record.imu.time_ms);
+    TEST_ASSERT_EQUAL_INT16(0, decoded.record.imu.yaw_cd);
+    TEST_ASSERT_EQUAL_INT16(0, decoded.record.imu.pitch_cd);
+    TEST_ASSERT_EQUAL_INT16(0, decoded.record.imu.roll_cd);
+}
+
+void test_v2_negative_skew_survives_a_millis_wrap(void) {
+    Packet p = make_packet_v2();
+    p.record.gps.time_ms = 3;           // just after the rollover
+    p.record.imu.time_ms = 0xFFFFFFFE;  // five ms earlier, just before it
+    uint8_t buf[PACKET_SIZE];
+    encode_packet_v2(p, buf, sizeof(buf));
+
+    Packet decoded;
+    TEST_ASSERT_TRUE(decode_packet(buf, sizeof(buf), &decoded));
+    TEST_ASSERT_TRUE(decoded.record.imu.valid);
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFE, decoded.record.imu.time_ms);
+}
+
+void test_decode_still_accepts_v1_and_zeroes_v2_fields(void) {
+    uint8_t buf[PACKET_SIZE];
+    encode_packet(make_packet_v2(), buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_HEX8(0x01, buf[1]);
+
+    Packet decoded;
+    TEST_ASSERT_TRUE(decode_packet(buf, sizeof(buf), &decoded));
+    TEST_ASSERT_EQUAL_UINT16(0, decoded.boot_count);
+    TEST_ASSERT_EQUAL_UINT16(0, decoded.tx_timeouts);
+    TEST_ASSERT_EQUAL_UINT16(0, decoded.battery_mv);
+    TEST_ASSERT_EQUAL_UINT16(2, decoded.record.diag.crc_errors);
+}
+
+void test_decode_rejects_unknown_version(void) {
+    uint8_t buf[PACKET_SIZE];
+    encode_packet_v2(make_packet_v2(), buf, sizeof(buf));
+    buf[1] = 0x03;
+    // Recompute the CRC so version is the only thing wrong.
+    const uint16_t crc = crc16_ccitt(buf, 43);
+    buf[43] = static_cast<uint8_t>(crc & 0xFF);
+    buf[44] = static_cast<uint8_t>(crc >> 8);
+
+    Packet decoded;
+    TEST_ASSERT_FALSE(decode_packet(buf, sizeof(buf), &decoded));
+}
+
+void test_encode_packet_as_dispatches_on_version(void) {
+    uint8_t buf[PACKET_SIZE];
+    encode_packet_as(WireVersion::V1, make_packet_v2(), buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_HEX8(0x01, buf[1]);
+    encode_packet_as(WireVersion::V2, make_packet_v2(), buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_HEX8(0x02, buf[1]);
+}
+
+void test_v2_encode_rejects_short_buffer(void) {
+    uint8_t buf[PACKET_SIZE - 1];
+    TEST_ASSERT_EQUAL_UINT(0, encode_packet_v2(make_packet_v2(), buf, sizeof(buf)));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_crc16_matches_known_vector);
@@ -129,5 +266,14 @@ int main(int, char **) {
     RUN_TEST(test_decode_rejects_corrupted_payload);
     RUN_TEST(test_decode_rejects_bad_magic);
     RUN_TEST(test_decode_rejects_wrong_length);
+    RUN_TEST(test_v2_golden_vector_pins_byte_layout);
+    RUN_TEST(test_v2_round_trip_preserves_every_field);
+    RUN_TEST(test_v2_folds_validity_into_flag_bits);
+    RUN_TEST(test_v2_marks_imu_invalid_when_skew_does_not_fit);
+    RUN_TEST(test_v2_negative_skew_survives_a_millis_wrap);
+    RUN_TEST(test_decode_still_accepts_v1_and_zeroes_v2_fields);
+    RUN_TEST(test_decode_rejects_unknown_version);
+    RUN_TEST(test_encode_packet_as_dispatches_on_version);
+    RUN_TEST(test_v2_encode_rejects_short_buffer);
     return UNITY_END();
 }

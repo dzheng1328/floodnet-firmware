@@ -12,17 +12,21 @@ namespace floodnet {
 /// packet older than this many sightings is no longer worth suppressing.
 const size_t DEDUP_CAPACITY = 32;
 
-/// Remembers recently seen (node_id, seq) pairs, evicting the oldest first.
+/// Remembers recently seen (node_id, boot_count, seq) triples, evicting the
+/// oldest first. boot_count is in the key because a node restarts `seq` at 0
+/// on every boot; without it, a node's first packets after a quick reboot
+/// would match its packets from before and be discarded.
 class DedupTable {
   public:
     DedupTable();
 
-    /// Records the pair and reports whether it had already been recorded.
-    bool seen(uint16_t node_id, uint32_t seq);
+    /// Records the triple and reports whether it had already been recorded.
+    bool seen(uint16_t node_id, uint16_t boot_count, uint32_t seq);
 
   private:
     struct Entry {
         uint16_t node_id;
+        uint16_t boot_count;
         uint32_t seq;
         bool used;
     };

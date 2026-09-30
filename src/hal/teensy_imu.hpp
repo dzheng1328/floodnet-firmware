@@ -72,6 +72,31 @@ class TeensyImu : public IImuSource {
         return true;
     }
 
+    /// BNO055 suspend mode, and no timer ticks while suspended: a flag set
+    /// with nothing to read would make the sampler issue a pointless read.
+    void suspend() {
+        timer_.end();
+        s_sample_due = false;
+        if (ready_) {
+            sensor_.enterSuspendMode();
+        }
+    }
+
+    /// Back to NDOF output. Primes a read, as begin() does, and fails the same
+    /// way begin() does if no hardware timer is available.
+    bool resume() {
+        if (!ready_) {
+            return false;
+        }
+        sensor_.enterNormalMode();
+        s_sample_due = true;
+        if (!timer_.begin(on_sample_due, SAMPLE_PERIOD_US)) {
+            ready_ = false;
+            return false;
+        }
+        return true;
+    }
+
   private:
     /// IntervalTimer takes a plain function pointer, so the flag is static.
     /// That limits this driver to one IMU per firmware image, which is what

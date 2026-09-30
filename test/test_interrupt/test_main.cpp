@@ -209,6 +209,79 @@ void test_no_transmission_without_a_complete_sentence(void) {
     TEST_ASSERT_EQUAL_UINT32(0, sampler.next_seq());
 }
 
+/// A v0x02 sampler on the CONTROL profile, built the way the Rig builds one.
+struct V2Rig {
+    SimClock clock;
+    FakeGps gps;
+    FakeImu imu;
+    FakeRadio radio;
+    InterruptSampler sampler;
+
+    V2Rig()
+        : clock(),
+          gps(kSentence, kGpsByteRate, FakeGps::MAX_FIFO_DEPTH),
+          imu(clock, kImuControlMs),
+          radio(clock, kRadioControlMs),
+          sampler(gps, imu, radio, clock, 0x0042, 3, WireVersion::V2) {
+        clock.add_observer(&gps);
+        clock.add_observer(&imu);
+        clock.add_observer(&radio);
+    }
+
+    void run_for(uint32_t duration_ms) {
+        const uint32_t end = clock.now_ms() + duration_ms;
+        while (clock.now_ms() < end) {
+            sampler.step();
+        }
+    }
+};
+
+void test_default_wire_version_is_still_v1(void) {
+    Rig rig(kImuControlMs, kRadioControlMs, FakeGps::MAX_FIFO_DEPTH);
+    rig.run_for(2000);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rig.radio.last_payload()[1]);
+}
+
+void test_v2_sampler_stamps_node_status_at_send_time(void) {
+    V2Rig rig;
+    rig.sampler.set_node_status(7, 3700);
+    rig.run_for(2000);
+
+    TEST_ASSERT_EQUAL_HEX8(0x02, rig.radio.last_payload()[1]);
+    Packet decoded;
+    TEST_ASSERT_TRUE(decode_packet(rig.radio.last_payload(), rig.radio.last_length(), &decoded));
+    TEST_ASSERT_EQUAL_UINT16(7, decoded.boot_count);
+    TEST_ASSERT_EQUAL_UINT16(3700, decoded.battery_mv);
+    TEST_ASSERT_EQUAL_UINT16(0, decoded.tx_timeouts);
+}
+
+void test_heartbeat_takes_a_sequence_number_and_reports_no_fix(void) {
+    V2Rig rig;
+    rig.gps.set_powered(false);
+    rig.sampler.enqueue_heartbeat();
+    TEST_ASSERT_EQUAL_UINT32(1, rig.sampler.next_seq());
+
+    rig.run_for(100);
+    TEST_ASSERT_EQUAL_UINT32(1, rig.sampler.packets_sent());
+    Packet decoded;
+    TEST_ASSERT_TRUE(decode_packet(rig.radio.last_payload(), rig.radio.last_length(), &decoded));
+    TEST_ASSERT_EQUAL_UINT32(0, decoded.seq);
+    TEST_ASSERT_FALSE(decoded.record.gps.valid);
+}
+
+void test_last_record_imu_valid_tracks_pairing(void) {
+    V2Rig with_imu;
+    with_imu.run_for(200);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, with_imu.sampler.next_seq());
+    TEST_ASSERT_TRUE(with_imu.sampler.last_record_imu_valid());
+
+    V2Rig without_imu;
+    without_imu.imu.set_powered(false);
+    without_imu.run_for(200);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, without_imu.sampler.next_seq());
+    TEST_ASSERT_FALSE(without_imu.sampler.last_record_imu_valid());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_emits_a_decodable_packet);
@@ -222,5 +295,9 @@ int main(int, char **) {
     RUN_TEST(test_accounting_stays_closed_across_a_timeout);
     RUN_TEST(test_normal_sf12_airtime_is_not_mistaken_for_a_wedge);
     RUN_TEST(test_no_transmission_without_a_complete_sentence);
+    RUN_TEST(test_default_wire_version_is_still_v1);
+    RUN_TEST(test_v2_sampler_stamps_node_status_at_send_time);
+    RUN_TEST(test_heartbeat_takes_a_sequence_number_and_reports_no_fix);
+    RUN_TEST(test_last_record_imu_valid_tracks_pairing);
     return UNITY_END();
 }

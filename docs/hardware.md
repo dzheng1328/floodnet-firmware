@@ -8,6 +8,7 @@
 | GPS | u-blox NEO-M8N | UART, NMEA 0183, 9600 baud |
 | IMU | Bosch BNO055 | I2C at 400 kHz. No data-ready interrupt; see below. |
 | Radio | HopeRF RFM95W (SX1276) | SPI, 915 MHz |
+| Battery sense | 2 x 100 kΩ divider | Cell to Teensy pin 14 (A0), for `battery_mv` |
 
 ## Pin assignment
 
@@ -20,6 +21,7 @@
 | Radio SPI CS | 10 |
 | Radio reset | 9 |
 | Radio DIO0 | 2 |
+| Battery sense (divided) | 14 (A0) |
 
 ## Radio configuration
 
@@ -52,3 +54,33 @@ If a framework upgrade changes the bundled version, check `RH_RF95`'s API agains
 
 Adafruit BNO055 is scoped to the node builds rather than shared across all of them.
 The gateway has no IMU, and pulling the library into that build makes Adafruit BusIO fail to resolve `SPI.h`.
+
+## Power modes
+
+Milestone 3 puts each part into its own low-power mode rather than switching its supply, so the only hardware addition is the battery divider above.
+
+| Part | Low-power mode | Driver call |
+|---|---|---|
+| NEO-M8N | software backup, woken by UART RX activity | `TeensyGps::enter_backup()` / `wake()`, using `UBX-RXM-PMREQ` |
+| BNO055 | suspend | `TeensyImu::suspend()` / `resume()` |
+| RFM95W | sleep | `TeensyRadio::sleep()` / `wake()` |
+| Teensy 4.1 | Snooze `deepSleep()` with a GPT timer wake | `TeensyPower::sleep_until()` |
+
+The bundled Snooze 6.3.9 miscounts time on Teensy 4: after a timer wake it advances `millis()` by 32.768 ms per slept second instead of 1000.
+`TeensyPower::sleep_until()` adds the difference itself; the comment there cites the library line.
+This is read from the library source and has not been observed on a board.
+
+The watchdog is WDOG1 at 90 s, programmed directly through `imxrt.h`.
+Both of its low-power suspend bits in `WDOG_WCR` are left clear: `WDW` (bit 7), which suspends it in WAIT mode, and `WDZST` (bit 0), which suspends it in STOP and DOZE.
+The bundled Snooze 6.3.9 enters WAIT mode: `hal_deepSleep()` in `src/hal/TEENSY_40/hal.c` sets `CCM_CLPCR_LPM(0x01)` at line 789, so `WDW` is the bit that matters for this build.
+The `WDW`-to-WAIT mapping is a reading of the RT1060 reference manual's `WDOG_WCR` description and has not been verified on a board.
+
+**First bench test: does WDOG1 count while its `CCM_CCGR3` gate is off during `deepSleep`?**
+The same function rewrites `CCM_CCGR3` at `hal.c:805`, keeping only the ACMP1-4 gates and `0x10000000`, which clears `CCM_CCGR3_WDOG1` (bits 17-16 in `imxrt.h`), and restores the register on wake at `hal.c:851`.
+If WDOG1 stops counting while its clock is gated, a timer wake that never fires would hang the node with nothing to reset it, whatever `WDW` and `WDZST` say.
+This is read from source and is the first thing to measure on a board.
+
+The boot counter lives in `SNVS_LPGPR3`, which survives resets while SNVS is powered.
+It is not in `LPGPR0`, because Snooze's `SnoozeAlarm` writes `SNVS_LPGPR` (offset 0x68, the legacy alias of `LPGPR0`) and would overwrite it.
+
+None of this has run on hardware.

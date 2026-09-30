@@ -39,8 +39,10 @@ class InterruptSampler {
     /// leaves headroom without letting one lost completion edge mute the node.
     static const uint32_t TX_TIMEOUT_MS = 5000;
 
+    /// `version` selects the wire format. v0x01 is the default, so the
+    /// node_interrupt build and every milestone 2 figure are unaffected.
     InterruptSampler(IGpsSource &gps, IImuSource &imu, IAsyncRadio &radio, IClock &clock,
-                     uint16_t node_id, uint8_t ttl);
+                     uint16_t node_id, uint8_t ttl, WireVersion version = WireVersion::V1);
 
     /// One pass of the main loop.
     void step();
@@ -73,6 +75,18 @@ class InterruptSampler {
     /// can count.
     uint32_t next_seq() const { return seq_; }
 
+    /// Node-level facts stamped into each packet when it is sent. Only v0x02
+    /// carries them.
+    void set_node_status(uint16_t boot_count, uint16_t battery_mv);
+
+    /// Queues a packet with gps.valid == false, stamped now: "alive, no fix".
+    /// It takes a sequence number like any other packet.
+    void enqueue_heartbeat();
+
+    /// Whether the most recently queued record carried a paired IMU sample.
+    /// False before any record is queued.
+    bool last_record_imu_valid() const { return last_record_imu_valid_; }
+
   private:
     bool collect_imu();
     size_t collect_gps();
@@ -96,6 +110,11 @@ class InterruptSampler {
     uint32_t tx_started_ms_;
     uint16_t tx_timeouts_;
     DiagCounters diag_;
+
+    WireVersion version_;
+    uint16_t boot_count_;
+    uint16_t battery_mv_;
+    bool last_record_imu_valid_;
 };
 
 }  // namespace floodnet

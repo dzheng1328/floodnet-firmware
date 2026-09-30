@@ -6,11 +6,12 @@ using namespace floodnet;
 void setUp(void) {}
 void tearDown(void) {}
 
-static Packet packet(uint16_t node_id, uint32_t seq, uint8_t ttl) {
+static Packet packet(uint16_t node_id, uint32_t seq, uint8_t ttl, uint16_t boot_count = 1) {
     Packet p;
     p.node_id = node_id;
     p.seq = seq;
     p.ttl = ttl;
+    p.boot_count = boot_count;
     return p;
 }
 
@@ -29,6 +30,15 @@ void test_same_sequence_from_another_node_relays(void) {
     DedupTable table;
     should_relay(table, packet(1, 100, 3));
     TEST_ASSERT_TRUE(should_relay(table, packet(2, 100, 3)));
+}
+
+void test_same_sequence_after_a_reboot_relays(void) {
+    // A node restarts its sequence at 0 after every reset. Keyed on
+    // (node_id, seq) alone, its first packets after a quick reboot match
+    // entries still in the table and are silently discarded.
+    DedupTable table;
+    TEST_ASSERT_TRUE(should_relay(table, packet(1, 0, 3, 1)));
+    TEST_ASSERT_TRUE(should_relay(table, packet(1, 0, 3, 2)));
 }
 
 void test_expired_packet_does_not_relay(void) {
@@ -71,6 +81,7 @@ int main(int, char **) {
     RUN_TEST(test_first_sighting_relays);
     RUN_TEST(test_duplicate_does_not_relay);
     RUN_TEST(test_same_sequence_from_another_node_relays);
+    RUN_TEST(test_same_sequence_after_a_reboot_relays);
     RUN_TEST(test_expired_packet_does_not_relay);
     RUN_TEST(test_expired_packet_is_not_recorded);
     RUN_TEST(test_table_evicts_oldest_entry);
