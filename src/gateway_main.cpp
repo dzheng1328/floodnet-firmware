@@ -1,5 +1,6 @@
 #include <Arduino.h>
 
+#include <floodnet/gateway_format.hpp>
 #include <floodnet/mesh.hpp>
 #include <floodnet/packet.hpp>
 
@@ -27,44 +28,11 @@ uint16_t g_short_reads = 0;
 /// One line per packet, comma separated, so the host pipeline can read it
 /// without a framing layer.
 void print_record(const floodnet::Packet &p, int16_t rssi) {
-    Serial.print("REC,");
-    Serial.print(p.node_id);
-    Serial.print(',');
-    Serial.print(p.seq);
-    Serial.print(',');
-    Serial.print(p.record.gps.time_ms);
-    Serial.print(',');
-    Serial.print(p.record.gps.lat_1e7);
-    Serial.print(',');
-    Serial.print(p.record.gps.lon_1e7);
-    Serial.print(',');
-    Serial.print(p.record.gps.alt_mm);
-    Serial.print(',');
-    Serial.print(p.record.gps.satellites);
-    Serial.print(',');
-    Serial.print(p.record.imu.yaw_cd);
-    Serial.print(',');
-    Serial.print(p.record.imu.pitch_cd);
-    Serial.print(',');
-    Serial.print(p.record.imu.roll_cd);
-    Serial.print(',');
-    Serial.print(p.record.diag.drops);
-    Serial.print(',');
-    Serial.print(p.record.diag.crc_errors);
-    Serial.print(',');
-    Serial.print(rssi);
-    Serial.print(',');
-    Serial.print(p.record.gps.valid ? 1 : 0);
-    Serial.print(',');
-    Serial.print(p.record.imu.valid ? 1 : 0);
-    // Appended, not inserted, so consumers of the existing fields are
-    // unaffected. v0x01 packets decode these as 0.
-    Serial.print(',');
-    Serial.print(p.boot_count);
-    Serial.print(',');
-    Serial.print(p.tx_timeouts);
-    Serial.print(',');
-    Serial.println(p.battery_mv);
+    // Formatted in floodnet_core so the simulated gateway writes the same bytes.
+    char line[floodnet::REC_LINE_MAX];
+    if (floodnet::format_rec_line(p, rssi, line, sizeof(line)) > 0) {
+        Serial.println(line);
+    }
 }
 
 }  // namespace
@@ -99,8 +67,10 @@ void loop() {
         if (g_decode_errors < 0xFFFF) {
             ++g_decode_errors;
         }
-        Serial.print("ERR,decode,");
-        Serial.println(g_decode_errors);
+        char line[32];
+        if (floodnet::format_decode_error_line(g_decode_errors, line, sizeof(line)) > 0) {
+            Serial.println(line);
+        }
         return;
     }
 
